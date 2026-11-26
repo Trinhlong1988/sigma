@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      CỐ Ý KHÔNG đặt <meta http-equiv="Content-Security-Policy"> ở đây.
+      Bản Electron dùng `src/renderer/index.html` (CSP trong meta vì không có máy chủ đặt header).
+      Bản WEB được phục vụ bởi `infra/web-static/serve-webapp-quanly.mjs` — CSP do MÁY CHỦ đặt bằng HEADER, là
+      NGUỒN SỰ THẬT DUY NHẤT. Nếu đặt thêm CSP ở meta thì TRÌNH DUYỆT ÁP CẢ HAI (giao của 2 chính sách) → mỗi lần
+      đổi địa chỉ API phải sửa 2 chỗ, bỏ sót 1 chỗ là CSP chặn fetch mà rất khó truy (bug-class "CSP chặn nhầm").
+    -->
+    <title>SigMa</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main-web.tsx"></script>
+  </body>
+</html>

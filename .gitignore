@@ -1,0 +1,132 @@
+# deps
+node_modules/
+**/node_modules/
+
+# build
+dist/
+out/
+build/
+# [Admin Demo 16/9] NGOẠI LỆ: thư viện sản phẩm bill giải trình là DỮ LIỆU NGUỒN (100 SP gas + 199 SP siêu thị),
+# mất là phải dựng lại tay → phải nằm trong git (vẫn backup off-repo <BACKUP_DIR>/env-config/).
+!apps/desktop/build/billexplain-seed.json
+release/
+*.exe
+apps/desktop/dist/
+apps/desktop/out/
+apps/desktop/release/
+
+# db & secrets (KHÔNG commit)
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+dev.db
+dev.db*
+**/prisma/*.db
+.env
+.env.*
+!.env.example
+
+# backups & runtime data
+backups/
+*.zip
+
+# prisma generated client
+**/generated/
+**/@prisma/client/
+
+# logs / os
+*.log
+.DS_Store
+Thumbs.db
+
+# test/coverage
+coverage/
+.vitest/
+
+# ts build info
+*.tsbuildinfo
+
+# TS emit lỡ tay vào src (bẫy: bare `tsc -p` không --noEmit với declaration+composite).
+# index.d.ts hand-maintained KHÔNG match (nó là input, không sinh .js/.d.ts.map).
+apps/desktop/src/**/*.js
+apps/desktop/src/**/*.js.map
+apps/desktop/src/**/*.d.ts.map
+
+# DB artifacts / backups (không commit binary DB)
+.backup_phase1/
+*.db.restored
+*.db-journal
+
+# 26/7 (B26 audit độc lập — HIGH: script tạm chứa mật khẩu thật hardcode lọt ngoài mọi rule trên) — script
+# verify/repro tạm dùng credential thật để test round-trip KHÔNG được track, tránh lặp lỗi ghi secret plaintext
+# vào git history. Script cần giữ lâu dài (không chứa secret) → xem xét dời sang docs/ thay vì để đây.
+**/scripts-tmp-verify/
+*-tmp.mjs
+*-tmp.ts
+apps/web-demo/screenshots/
+
+# 26/7 (B32 — thong bao day Firebase) — service account key THAT (bot-api goi Firebase Admin SDK gui push).
+# KHONG BAO GIO commit — dung nguyen tac B27 (khong hardcode/leak credential that vao git).
+apps/bot-api/secrets/
+
+# 27/7 — file dinh kem chat that (anh/file nguoi dung tai len), CHAT_UPLOADS_DIR mac dinh. Du lieu nguoi dung
+# that, khong bao gio commit.
+apps/bot-api/uploads/
+
+# Agent worktrees tạm (harness tạo) — không track
+.claude/worktrees/
+
+# Junction sandbox rò vào cây repo (D:\alpha-downloads / <UPDATES_DIR> map vào copy-repo qua Bash sandbox).
+# KHÔNG track — deploy đích thật đi qua PowerShell (incident_bash_sandbox_junction_alpha_deploy_dirs).
+alpha-downloads/
+alpha-updates/
+
+# Golden fixtures bill chuyển khoản — DATA TIỀN THẬT (account/tên/số tiền), KHÔNG commit
+apps/zalo-watcher/golden-transfer/
+
+# Alias-học phân-hướng bill CK (data runtime tên→entity) — không commit
+apps/zalo-watcher/transfer-alias.jsonl
+
+# [8/9] ảnh bill tạm của OCR (token 6h) + sửa tay OCR — dữ liệu chạy máy, KHÔNG vào repo
+apps/bot-api/data/
+
+# [9/9] sidecar mb-feed: node_modules + file env chứa tài khoản ngân hàng — TUYỆT ĐỐI không vào repo
+apps/mb-feed/node_modules/
+apps/mb-feed/*.env
+
+apps/mb-feed/run-mb-feed.cmd
+
+apps/desktop/dist-tn/
+apps/desktop/_evidence/
+apps/quanly-api/run-alpha-tn.cmd
+apps/zalo-watcher/gemini-keys.json
+apps/zalo-watcher/gemini-usage.jsonl
+
+# Rác phiên làm việc — KHÔNG đưa lên git (13/11)
+# backup-phien chứa DUMP DB THẬT + file phiên đăng nhập ⇒ cấm đẩy lên GitHub.
+backup-phien/
+apps/desktop/dist-web/
+# bản web THỬ (dựng để kiểm trên DB sigma_thu, không bao giờ là bản phát hành)
+apps/desktop/dist-web-thu/
+apps/desktop/screenshots/
+apps/zalo-watcher/_*.png
+apps/zalo-watcher/crop*.png
+apps/zalo-watcher/rot*.png
+~$*
+# số đo tạm đổ ra file khi dò giao diện
+apps/_nut_quet.json
+apps/desktop/_do-cot.json
+apps/desktop/_do-cot.txt
+apps/desktop/_style_block.txt
+
+# Ảnh chụp từ cổng kiểm chạy ở gốc repo (vd _kiem-web-khong-demo) — không đưa vào kho.
+/screenshots/
+
+# Bản sao an toàn trước khi LEAD thao tác trên sổ thật — không đưa vào kho.
+/_backup-thao-tac/
+alpha-updates/
+alpha-downloads/
+_anh-kiem/
+
+_backup-role/

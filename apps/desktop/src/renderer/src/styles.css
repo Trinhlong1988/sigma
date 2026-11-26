@@ -1,0 +1,271 @@
+@import 'tailwindcss';
+
+/* Be Vietnam Pro — offline via @fontsource (no Google CDN; app runs offline). */
+@import '@fontsource/be-vietnam-pro/400.css';
+@import '@fontsource/be-vietnam-pro/500.css';
+@import '@fontsource/be-vietnam-pro/600.css';
+@import '@fontsource/be-vietnam-pro/700.css';
+
+/* === DESIGN-SYSTEM BRAND MỚI (glass) === Nguồn DUY NHẤT token màu brand + class glass
+ * (.btn-primary/.btn-teal/.btn-soft/.card-glass) = brand.css (auto-sinh bởi scripts/brand_sync.py,
+ * ĐỪNG SỬA TAY). Import TRƯỚC @theme app để palette mới (--color-brand #1877d6, teal #3bc3d0,
+ * hover #135fb0, tint #eaf4fb, --radius-button 16px) thắng. Các token --color-brand* CŨ (#0579cc GLB
+ * rebrand) đã bỏ khỏi @theme dưới đây để tránh đè ngược. */
+@import './brand.css';
+
+/* KiotViet-inspired palette (IMS_SPEC brief). Exposed as Tailwind theme tokens.
+ * Chỉ còn token KHÔNG thuộc brand.css; brand/teal/tint do brand.css cấp. */
+@theme {
+  --font-sans: 'Be Vietnam Pro', ui-sans-serif, system-ui, sans-serif;
+
+  --color-sidebar: #eceef3; /* xám nhẹ (Admin Demo 15/7) — nút menu active giữ nguyên gradient xanh nổi */
+  --color-sidebar-text: #4b5563; /* chữ slate đậm cho nền sáng */
+  --color-appbg: #f4f6fa;
+  --color-line: #e5e9f0;
+  --color-success: #16a34a;
+  --color-danger: #dc2626;
+  --color-warning: #f59e0b;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* Admin Demo 15/7 — chuyển menu 3D RÕ: content ngả nhẹ trong không gian (perspective + rotateX) rồi
+ * dựng thẳng + nổi lên, mờ dần. Cảm giác "trang lật lên" rõ hơn khi bấm đổi menu. */
+@keyframes pageIn {
+  0%   { opacity: 0; transform: perspective(1200px) translateY(26px) rotateX(7deg) scale(0.965); }
+  60%  { opacity: 1; }
+  100% { opacity: 1; transform: perspective(1200px) translateY(0) rotateX(0) scale(1); }
+}
+.page-enter { animation: pageIn 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); transform-origin: top center; will-change: transform, opacity; }
+
+/* Admin Demo 15/7 — GHIM thanh cuộn NGANG của bảng danh sách ở đáy khung nhìn: giới hạn chiều cao khung
+ * bảng theo viewport rồi cho cuộn TRONG khung. thead đã sticky top-0 nên tiêu đề luôn hiện; thanh cuộn
+ * ngang nằm ở đáy khung (trong tầm nhìn) thay vì cuối bảng dài phải cuộn cả trang mới thấy. */
+.list-scroll {
+  max-height: calc(100vh - 15rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--color-appbg);
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thanh cuộn mảnh, bo tròn, theo tông UI (R_UI_STANDARD). Firefox + WebKit. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #c3ccda transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #c3ccda;
+  border-radius: 9999px;
+  border: 3px solid transparent; /* tạo padding → thumb trông mảnh ~4px */
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #97a4ba;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Sidebar nền xám sáng: thumb tối-mờ cho hợp nền #eceef3. */
+.bg-sidebar {
+  scrollbar-color: rgba(71, 85, 105, 0.28) transparent;
+}
+.bg-sidebar ::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.28);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+.bg-sidebar ::-webkit-scrollbar-thumb:hover {
+  background: rgba(71, 85, 105, 0.45);
+}
+
+/* ============ BUTTONS — DESIGN-SYSTEM GLASS (brand mới) ============
+ * Nút GLASS chính .btn-primary/.btn-teal/.btn-soft/.card-glass do brand.css (auto-sinh) SỞ HỮU — 1 nguồn.
+ * Ở đây CHỈ: (a) chuẩn hoá bo góc + độ đậm chữ + chuyển động cho MỌI variant (kể cả nút glass brand.css)
+ *            để ĐỒNG NHẤT tuyệt đối; (b) giữ variant NGỮ NGHĨA còn lại (edit=vàng, danger=đỏ, neutral=xám)
+ *            theo CÙNG ngôn ngữ glass. Khớp btn-primary brand.css: hover đậm bóng (KHÔNG nhấc), active lún nhẹ.
+ * Admin Demo 3/8: "100% button đồng bộ, nổi đẹp glass, không nút nào phẳng". */
+
+/* (a) Đồng nhất bo góc + độ đậm chữ cho MỌI nút variant — thắng mọi class rounded/font inline (utility layer) */
+.btn-primary,
+.btn-teal,
+.btn-soft,
+.btn-edit,
+.btn-danger,
+.btn-neutral {
+  border-radius: 9999px; /* PARITY SigMa (web-demo .rounded-full = 9999px) — pill khớp từng byte */
+  font-weight: 700;
+}
+/* PARITY SigMa 7/8c — nhấc hover + lún active GIỐNG HỆT web-demo (.btn-primary/.btn-glass:hover
+ * translateY(-2px); active translateY(0) scale(0.99)). Nội dung z-index:1 để icon nổi trên dải sáng kính
+ * (khớp `.btn-primary > * {z-index:1}` của SigMa). → 2 sản phẩm 1 cảm giác 3D. */
+.btn-primary:hover:not(:disabled),
+.btn-teal:hover:not(:disabled),
+.btn-soft:hover:not(:disabled),
+.btn-danger:hover:not(:disabled),
+.brand-accent:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+.btn-primary:active:not(:disabled),
+.btn-teal:active:not(:disabled),
+.btn-soft:active:not(:disabled),
+.btn-edit:active:not(:disabled),
+.btn-danger:active:not(:disabled),
+.btn-neutral:active:not(:disabled),
+.brand-accent:active:not(:disabled) {
+  transform: translateY(0) scale(0.99);
+}
+.btn-primary > *,
+.btn-teal > *,
+.btn-soft > *,
+.btn-danger > *,
+.btn-edit > *,
+.btn-neutral > *,
+.brand-accent > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* (b) Variant ngữ nghĩa + soft: nền/dải sáng kính ::before/bóng — cùng ngôn ngữ glass với brand.css.
+ * FIX REGRESSION (Admin Demo 8/8, 0.2.80→81): .btn-danger KHÔNG còn ở đây — trước đây khối này ghi đè
+ * glass đỏ của brand.css bằng gradient 135deg đặc + `border:0` (mất rim + mất glow) → nút Xóa PHẲNG,
+ * lệch hẳn họ cyan glass (confirm/teal/soft). Nay để brand.css (1 NGUỒN) cấp trọn glass đỏ
+ * (gradient 180deg sáng-đỉnh + rim #ffc2c2 + glow) — danger đồng nhất với cả họ. .btn-edit nâng lên
+ * CÙNG ngôn ngữ glass (rim 2px + glow + gradient 180deg sáng-đỉnh + sheen pill). */
+.btn-edit,
+.btn-neutral,
+.btn-soft {
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.16s cubic-bezier(0.22, 0.61, 0.36, 1), box-shadow 0.16s ease, filter 0.16s ease;
+}
+.btn-neutral::before,
+.btn-soft::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 50% 0;
+  border-radius: var(--radius-button) var(--radius-button) 0 0;
+  pointer-events: none;
+}
+
+/* edit = vàng (sửa) — GLASS đầy đủ khớp brand.css (rim + glow + gradient 180deg sáng-đỉnh + sheen pill) */
+.btn-edit {
+  background: linear-gradient(180deg, #ffdb8f 0%, #f9bf4a 45%, #e8920b 100%);
+  color: #fff;
+  border: 2px solid #ffe1a8;
+  box-shadow: 0 0 0 1px rgba(255, 225, 168, 0.55), 0 0 16px 2px rgba(245, 158, 11, 0.5), inset 0 2px 3px rgba(255, 255, 255, 0.9), inset 0 -8px 13px rgba(180, 110, 10, 0.45);
+}
+.btn-edit::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 2px;
+  height: 46%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0));
+  pointer-events: none;
+}
+.btn-edit:hover:not(:disabled) {
+  filter: brightness(1.05);
+  box-shadow: 0 0 0 1px rgba(255, 225, 168, 0.65), 0 0 24px 4px rgba(245, 158, 11, 0.6), inset 0 2px 3px rgba(255, 255, 255, 0.95), inset 0 -8px 13px rgba(180, 110, 10, 0.5);
+}
+
+/* neutral = xám viền brand (hủy / phụ) */
+.btn-neutral {
+  background: linear-gradient(165deg, #ffffff 0%, #f3f6fb 60%, #e6edf6 100%);
+  color: #334155;
+  border: 1px solid rgba(93, 169, 231, 0.35);
+  box-shadow: 0 6px 16px rgba(24, 119, 214, 0.12), inset 0 1px 0 #fff;
+}
+.btn-neutral::before {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0));
+}
+.btn-neutral:hover:not(:disabled) {
+  box-shadow: 0 9px 20px rgba(24, 119, 214, 0.18), inset 0 1px 0 #fff;
+}
+
+/* soft: brand.css cấp nền/viền/bóng — bổ sung dải sáng kính + hover cho đồng nhất */
+.btn-soft::before {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0));
+}
+.btn-soft:hover:not(:disabled) {
+  box-shadow: 0 10px 22px rgba(24, 119, 214, 0.24), inset 0 1px 0 #fff, 0 0 0 1px rgba(93, 169, 231, 0.4);
+}
+
+/* ============ ACCENT NHẤN ĐỒNG NHẤT (Admin Demo 5/8, thống nhất glass 7/8) ============
+ * MỘT NGUỒN DUY NHẤT cho MỌI trạng-thái-NHẤN/active/header brand: menu sidebar đang chọn, tab/segmented
+ * đang chọn, header hòm thư, banner cập nhật, header dialog toast… Trước đây mỗi chỗ tự viết
+ * `bg-gradient-to-br/-r from-brand to-brand-teal` → HƯỚNG + KÍCH THƯỚC khác nhau khiến 2 tông chỏi.
+ * FIX 5/8: gom về CHUNG `.brand-accent`. FIX 7/8 (Admin Demo đo computed style bản 0.2.79): dùng CHÍNH
+ * `var(--gradient-accent)` — ĐÚNG hệ glass NHẠT của Button (btn-primary) — thay cho `--gradient-brand`
+ * SATURATED cũ. Trước đây tab/nav active ngả xanh-teal ĐẬM còn nút Xuất Excel/Lọc là glass NHẠT → LỆCH.
+ * Nay MỌI "màu chủ đạo" (nút + tab-active + nav-active + header) = CÙNG 1 gradient + chữ trắng + sheen
+ * kính → đồng nhất tuyệt đối. Prominence của pill do shadow/ring ở nơi dùng (Dashboard/Tabs) lo.
+ * Đổi tông brand chỉ sửa Ở ĐÂY (1 chỗ).
+ * FIX 7/8b (Admin Demo "phải GIỐNG button 100%", đối chiếu SigMa apps/web-demo): KHÔNG chỉ trùng
+ * backgroundImage — nay `.brand-accent` NHÂN BẢN TRỌN glass của `.btn-primary` (brand.css, TRÙNG BYTE với
+ * SigMa brand.css): cùng gradient + cùng border rim + cùng box-shadow + cùng dải sáng kính ::before +
+ * cùng color/text-shadow. → tab-active / nav-active / header == nút Button từng thuộc tính. */
+.brand-accent {
+  background-image: var(--gradient-accent);
+  background-color: var(--color-brand); /* fallback nếu biến gradient thiếu — không bao giờ để trắng/lệch */
+  color: #0d4a7a; /* Admin Demo 11/8: chữ TỐI đồng nhất (tab-active + menu-active) cho dễ đọc trên glass sáng, không đổi nền */
+  text-shadow: none;
+  border: 2px solid #a3defd; /* rim khớp btn-primary brand.css */
+  box-shadow: 0 0 0 1px rgba(163, 222, 253, 0.55), 0 0 16px 2px rgba(94, 174, 222, 0.55), inset 0 2px 3px rgba(255, 255, 255, 0.9), inset 0 -8px 13px rgba(15, 159, 224, 0.5);
+  position: relative;
+  overflow: hidden;
+  isolation: isolate; /* stacking context riêng → ::before z-index:-1 nằm dưới chữ, không tràn ra ngoài */
+}
+.brand-accent::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 2px;
+  height: 46%;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0));
+  pointer-events: none;
+  z-index: -1; /* dải sáng kính DƯỚI nội dung → chữ/icon crisp, hết "mịn xấu" */
+}
+
+/* ============ GLASS CRISP — dải sáng ::before XUỐNG DƯỚI nội dung (Admin Demo 7/8 "3d glass còn ren mịn xấu")
+ * Gốc: brand.css set ::before không z-index → phủ MỜ nửa trên chữ/icon (SigMa đã fix bằng content
+ * z-index:1). Ở đây fix bằng CSS thuần cho MỌI nút glass: isolation tạo stacking + ::before z-index:-1 →
+ * chữ SẮC NÉT trên nền kính, KHÔNG đổi gradient/màu (vẫn == SigMa). Áp đồng loạt 1 nguồn. */
+.btn-primary,
+.btn-teal,
+.btn-soft,
+.btn-edit,
+.btn-danger,
+.btn-neutral {
+  isolation: isolate;
+}
+.btn-primary::before,
+.btn-teal::before,
+.btn-soft::before,
+.btn-edit::before,
+.btn-danger::before,
+.btn-neutral::before {
+  z-index: -1;
+}

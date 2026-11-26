@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <external-path name="my_images" path="." />
+    <cache-path name="my_cache_images" path="." />
+    <!-- Việc #5 — APK bản mới tải vào getExternalFilesDir(null)/updates (thư mục riêng app). external-files-path
+         trỏ gốc getExternalFilesDir để FileProvider cấp content:// URI cho Intent cài. Xem ApkUpdatePlugin.java. -->
+    <external-files-path name="apk_updates" path="updates" />
+</paths>

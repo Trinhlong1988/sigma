@@ -1,0 +1,415 @@
+// PHASE H2-core — Thu–Chi: Trang Phiếu thu / Phiếu chi (§D/§E). 1 component, prop `kind` phân biệt
+// THU (phiếu thu) / CHI (phiếu chi). Form lập phiếu (phiếu chi BẮT BUỘC người chi — I#3) + list
+// realtime + lọc (danh mục/quỹ/khoảng ngày) + nút Hủy phiếu (xác nhận mật khẩu + lý do).
+// Số dư quỹ tính realtime từ phiếu POSTED (phiếu CANCELLED không tính). Tiền = VND nguyên > 0.
+import { useEffect, useState, useRef } from 'react';
+import { Plus, Ban, Loader2, Receipt, Download, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
+import type { AuthUser } from '@sigma/shared';
+import { hasPermission, fmtDate, groupDigits } from '@sigma/shared';
+import type { CashEntryDto, CashflowSummary, CashflowUserLite, EntryCategoryLite, FundDto, CreateCashEntryInput, CashPartnerLite } from '../../../preload/index.d';
+import { useToast } from '../lib/toast.js';
+import { Modal } from '../components/Modal.js';
+import { Field, inputCls } from '../components/Field.js';
+import { FilterBar } from '../components/FilterBar.js';
+import { Button } from '../components/Button.js';
+import { IconButton } from '../components/IconButton.js';
+import { StatBar } from '../components/StatBar.js';
+import { StaleBanner } from '../lib/realtime.js';
+import { CanhBaoCatDanhSach } from '../components/CanhBaoCatDanhSach.js';
+import { statusTone } from '../components/StatusPill.js';
+import { PasswordInput } from '../components/PasswordInput.js';
+import { ImportButton } from '../components/ImportModal.js';
+import { exportCsv } from '../lib/exportCsv.js';
+import { useRowSelection, SelectAllCell, SelectCell } from '../components/Selection.js';
+// MẪU CHỐT 6/11 — kiểu bảng lấy TỪ MODULE DÙNG CHUNG, cấm chép chuỗi class vào trang.
+import { thChuan, tdChuan, tdTongChuan, tdTien, trChuan, KhungBang } from '../components/BangChuan.js';
+
+/** Phiếu hủy TRỰC TIẾP được: thủ công (sourceType=null) + thu tiền bán máy (SALE_COLLECT). Phiếu hệ
+ *  thống khác (cọc/thuê/nợ xấu/doanh thu bán máy) phải hủy ở nghiệp vụ gốc — backend cũng chặn (SOURCE_LOCKED). */
+function isCancellable(r: CashEntryDto): boolean {
+  return r.status === 'POSTED' && (r.sourceType === null || r.sourceType === 'SALE_COLLECT');
+}
+
+function money(n: number): string {
+  const neg = n < 0;
+  const s = Math.abs(Math.round(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return (neg ? '−' : '') + s + 'đ';
+}
+/** Tiền TRONG BẢNG: bỏ ký tự "đ" (MẪU CHỐT 6/11 §2 — cột đã căn phải nên không cần ký hiệu). */
+function tienBang(n: number): string {
+  return money(n).replace('đ', '');
+}
+/** Ngày hôm nay dạng YYYY-MM-DD (local) cho input[type=date]. */
+function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function StatusBadge({ status }: { status: string }): JSX.Element {
+  const map: Record<string, { label: string; cls: string }> = {
+    POSTED: { label: 'Đã ghi', cls: 'bg-success/10 text-success' },
+    CANCELLED: { label: 'Đã hủy', cls: 'bg-slate-200 text-slate-500' },
+    DRAFT: { label: 'Nháp', cls: 'bg-warning/10 text-warning' }
+  };
+  const s = map[status] ?? { label: status, cls: 'bg-slate-100 text-slate-500' };
+  return <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${s.cls}`}>{s.label}</span>;
+}
+
+export function CashEntryPage({ user, kind }: { user: AuthUser; kind: 'THU' | 'CHI' }): JSX.Element {
+  const toast = useToast();
+  const canCreate = hasPermission(user, 'CASHENTRY_CREATE');
+  const canCancel = hasPermission(user, 'CASHENTRY_CANCEL');
+  const isThu = kind === 'THU';
+
+  const [rows, setRows] = useState<CashEntryDto[]>([]);
+  const [summary, setSummary] = useState<CashflowSummary>({ count: 0, totalThu: 0, totalChi: 0, net: 0 });
+  const [loading, setLoading] = useState(true);
+  const [fCategory, setFCategory] = useState('');
+  const [fFund, setFFund] = useState('');
+  const [fStatus, setFStatus] = useState('');
+  const [fFrom, setFFrom] = useState('');
+  const [fTo, setFTo] = useState('');
+
+  const [cats, setCats] = useState<EntryCategoryLite[]>([]);
+  const [funds, setFunds] = useState<FundDto[]>([]);
+  const [users, setUsers] = useState<CashflowUserLite[]>([]);
+  const [partners, setPartners] = useState<CashPartnerLite[]>([]);
+
+  const [form, setForm] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<CashEntryDto | null>(null);
+  const sel = useRowSelection();
+  const [bulkOpen, setBulkOpen] = useState(false);
+
+  const kindCats = cats.filter((c) => c.kind === kind);
+  const selectableIds = rows.filter(isCancellable).map((r) => r.id);
+  const selectedRows = rows.filter((r) => sel.isSelected(r.id));
+  const selectedTotal = selectedRows.reduce((s, r) => s + r.amount, 0);
+
+  async function loadRefs(): Promise<void> {
+    const [c, f, u, p] = await Promise.all([window.api.cashEntryCategoryLite(), window.api.fundList({ active: true }), window.api.fundUserLite(), window.api.cashEntryPartnerLite()]);
+    if (c.ok && c.data) setCats(c.data);
+    if (f.ok && f.data) setFunds(f.data);
+    if (u.ok && u.data) setUsers(u.data);
+    if (p.ok && p.data) setPartners(p.data);
+  }
+  // [VÁ 6/11] "Xóa lọc" trước đây dùng setTimeout(reload, 0) ⇒ chạy đúng CLOSURE CŨ nên vẫn gửi bộ
+  // lọc CŨ lên máy chủ (đo thật: gõ ZZZTEST, bấm Xóa lọc, máy chủ vẫn nhận search="ZZZTEST").
+  // Giữ bản MỚI NHẤT của reload trong ref rồi gọi qua ref — state đã commit xong mới gọi.
+  const reloadRef = useRef<() => void>(() => {});
+  reloadRef.current = () => void reload();
+
+  async function reload(): Promise<void> {
+    setLoading(true);
+    sel.clear(); // audit 15/7 — dọn lựa chọn cũ để không thao tác nhầm hàng đã bị lọc/ẩn
+    try {
+      const res = await window.api.cashEntryList({
+        kind,
+        categoryId: fCategory ? Number(fCategory) : undefined,
+        fundId: fFund ? Number(fFund) : undefined,
+        status: fStatus || undefined,
+        fromDate: fFrom || undefined,
+        toDate: fTo || undefined
+      });
+      if (res.ok && res.data) { setRows(res.data); setSummary(res.summary ?? { count: 0, totalThu: 0, totalChi: 0, net: 0 }); }
+      else if (res.message) toast.alert(res.message);
+    } catch (e) {
+      // FE-03 (Codex 15/7): IPC reject không được để spinner treo mãi.
+      toast.alert(e instanceof Error ? e.message : 'Không tải được dữ liệu (mất kết nối máy chủ?).', 'Lỗi tải dữ liệu');
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => { void loadRefs(); }, []);
+  useEffect(() => { void reload(); /* eslint-disable-next-line */ }, [kind, fCategory, fFund, fStatus]);
+
+  const totalThisKind = isThu ? summary.totalThu : summary.totalChi;
+  // SỐ CỘT THẬT của bảng — dùng CHUNG cho hàng rỗng / hàng đệm / tổng colSpan của tfoot (MẪU CHỐT §1).
+  // 9 cột cố định + (ô tích + ô Thao tác) khi có quyền hủy. Trước đây colSpan hard-code 11/9 — đổi cột là lệch.
+  const soCot = 9 + (canCancel ? 2 : 0);
+  const soCotTruocTien = canCancel ? 5 : 4; // [tích] Mã · Ngày · Danh mục · Quỹ
+  const soCotSauTien = soCot - soCotTruocTien - 1; // Hình thức · Người · Đối tác · Trạng thái [· Thao tác]
+  const tongTien = rows.filter((r) => r.status === 'POSTED').reduce((s, r) => s + r.amount, 0);
+
+  return (
+    <div data-nut-vuong data-trang-full className="flex h-full min-h-0 w-full flex-col">
+      <div className="mb-4 flex shrink-0 items-start justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-800">{isThu ? 'Phiếu Thu' : 'Phiếu Chi'}</h2>
+          <p className="text-sm text-slate-500">{isThu ? 'Ghi nhận mỗi lần THU tiền (bán máy, doanh thu khác…). Thu công nợ dùng chức năng riêng (pha sau).' : 'Ghi nhận mỗi lần CHI tiền (chi phí, chi lương…). Bắt buộc chọn người chi.'}</p>
+        </div>
+        {canCreate && <Button variant="confirm" icon={<Plus className="h-4 w-4" />} onClick={() => funds.length ? setForm(true) : toast.alert('Cần tạo ít nhất 1 quỹ trước khi lập phiếu.', 'Thiếu quỹ')}>{isThu ? 'Lập phiếu thu' : 'Lập phiếu chi'}</Button>}
+      </div>
+
+      <StatBar items={[
+        { label: 'Số phiếu (đã ghi)', value: summary.count, icon: <Receipt className="h-4 w-4" /> },
+        { label: isThu ? 'Tổng thu' : 'Tổng chi', value: money(totalThisKind), icon: isThu ? <ArrowDownCircle className="h-4 w-4" /> : <ArrowUpCircle className="h-4 w-4" />, tone: isThu ? statusTone('ACTIVE') : 'bg-warning/10 text-warning' }
+      ]} />
+
+      <FilterBar search="" onSearch={() => undefined} searchPlaceholder=""
+        fromDate={fFrom} toDate={fTo} onFromDate={setFFrom} onToDate={setFTo}
+        selects={[
+          { key: 'c', placeholder: 'Tất cả danh mục', value: fCategory, options: kindCats.map((c) => ({ value: String(c.id), label: c.name })), onChange: setFCategory },
+          { key: 'f', placeholder: 'Tất cả quỹ', value: fFund, options: funds.map((f) => ({ value: String(f.id), label: f.name })), onChange: setFFund },
+          { key: 's', placeholder: 'Tất cả trạng thái', value: fStatus, options: [{ value: 'POSTED', label: 'Đã ghi' }, { value: 'CANCELLED', label: 'Đã hủy' }], onChange: setFStatus }
+        ]}
+        onApply={reload} onReset={() => { setFCategory(''); setFFund(''); setFStatus(''); setFFrom(''); setFTo(''); setTimeout(() => reloadRef.current(), 0); }}
+        coChuNho locPhai />
+
+      <div className="mb-3 flex shrink-0 items-center justify-between">
+        <div className="text-sm text-slate-500">{rows.length} phiếu</div>
+        <div className="flex items-center gap-2">
+        {canCreate && <ImportButton entityKey={isThu ? 'cashThu' : 'cashChi'} label={isThu ? 'Phiếu thu' : 'Phiếu chi'} onImported={reload} />}
+        <Button data-nut="excel" variant="confirm" icon={<Download className="h-4 w-4" />} onClick={() => exportCsv(isThu ? 'phieu_thu' : 'phieu_chi', ['Mã', 'Ngày', 'Danh mục', 'Quỹ', 'Số tiền', 'Hình thức', isThu ? 'Người nhận' : 'Người chi', isThu ? 'Thu của' : 'Chi cho', 'Trạng thái', 'Ghi chú'], rows.map((r) => [r.code ?? '', fmtDate(r.entryDate), r.categoryName ?? '', r.fundName ?? '', Number(r.amount), r.method === 'CK' ? 'Chuyển khoản' : 'Tiền mặt', (isThu ? r.receiverUserName : r.payerUserName) ?? '', r.partnerName ?? r.partnerText ?? '', r.status === 'POSTED' ? 'Đã ghi' : r.status === 'CANCELLED' ? 'Đã hủy' : r.status, r.note ?? '']), undefined, undefined, { cotTien: ['Số tiền'] })} /* [B299] */>Xuất Excel</Button>
+        </div>
+      </div>
+
+      <StaleBanner domain="CashEntry" onReload={reload} className="mb-2" />
+      {/* [B331] summary.count = tổng phiếu ĐÃ GHI trong kỳ; rows có thể bị LIMIT ⇒ cảnh báo khi lệch. */}
+      <CanhBaoCatDanhSach soHienThi={rows.length} tong={summary.count} className="mb-2" />
+      {canCancel && sel.count > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-3 rounded-xl border border-danger/30 bg-danger/5 px-4 py-2.5">
+          <span className="text-sm font-medium text-slate-700">Đã chọn <b>{sel.count}</b> phiếu · tổng <b className="tabular-nums">{money(selectedTotal)}</b></span>
+          <div className="ml-auto flex items-center gap-2">
+            <Button variant="soft" size="sm" onClick={() => sel.clear()}>Bỏ chọn</Button>
+            <Button variant="danger" size="sm" icon={<Ban className="h-4 w-4" />} onClick={() => setBulkOpen(true)}>Hủy {sel.count} phiếu đã chọn</Button>
+          </div>
+        </div>
+      )}
+      {/* MẪU CHỐT 6/11 — KhungBang dùng chung: tiêu đề ghim trên, hàng TỔNG ghim đáy, thanh cuộn to.
+          Không ẩn cột theo breakpoint: thiếu chỗ thì CUỘN NGANG bằng min-w trên <table>. */}
+      <KhungBang>
+        <table className="h-full w-full min-w-[1180px] text-xs">
+          <thead className="sticky top-0 z-20 bg-slate-200">
+            <tr>
+              {canCancel && <SelectAllCell ids={selectableIds} sel={sel} />}
+              <th className={thChuan + ' w-[104px]'}>Mã</th>
+              <th className={thChuan + ' w-[92px]'}>Ngày</th>
+              <th className={thChuan + ' w-[168px]'}>Danh mục</th>
+              <th className={thChuan + ' w-[150px]'}>Quỹ</th>
+              <th className={thChuan + ' w-[126px] min-w-[126px]'}>Số tiền</th>
+              <th className={thChuan + ' w-[110px]'}>Hình thức</th>
+              <th className={thChuan + ' w-[140px]'}>{isThu ? 'Người nhận' : 'Người chi'}</th>
+              <th className={thChuan + ' w-[150px]'}>{isThu ? 'Thu của' : 'Chi cho'}</th>
+              <th className={thChuan + ' w-[100px]'}>Trạng thái</th>
+              {canCancel && <th className={thChuan + ' w-[90px]'}>Thao tác</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <tr><td colSpan={soCot} className="px-4 py-8 text-center text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={soCot} className="px-4 py-10 text-center text-slate-400"><Receipt className="mx-auto mb-2 h-6 w-6" /> Chưa có phiếu {isThu ? 'thu' : 'chi'}.</td></tr>}
+            {!loading && rows.map((r, i) => (
+              <tr key={r.id} className={trChuan(i) + (r.status === 'CANCELLED' ? ' opacity-60' : '')}>
+                {canCancel && (isCancellable(r) ? <SelectCell id={r.id} sel={sel} /> : <td className={tdChuan} />)}
+                <td className={tdChuan + ' font-mono text-slate-500'}>{r.code}</td>
+                <td className={tdChuan + ' text-center text-slate-600'}>{fmtDate(r.entryDate)}</td>
+                <td className={tdChuan + ' text-slate-700'}>{r.categoryName ?? '—'}</td>
+                <td className={tdChuan + ' text-slate-600'}>{r.fundName ?? '—'}</td>
+                {/* Cột tiền: căn phải · tabular-nums · text-slate-800 · KHÔNG in đậm (MẪU CHỐT §2). */}
+                <td className={tdTien}>{tienBang(r.amount)}</td>
+                <td className={tdChuan + ' text-center text-slate-600'}>{r.method === 'CK' ? 'Chuyển khoản' : 'Tiền mặt'}</td>
+                <td className={tdChuan + ' text-slate-600'}>{(isThu ? r.receiverUserName : r.payerUserName) ?? '—'}</td>
+                <td className={tdChuan + ' text-slate-600'}>{r.partnerName ?? r.partnerText ?? '—'}</td>
+                <td className={tdChuan + ' text-center'}><StatusBadge status={r.status} /></td>
+                {canCancel && (
+                  <td className={tdChuan}><div className="flex justify-end">
+                    {isCancellable(r) && <IconButton title="Hủy phiếu" tone="danger" onClick={() => setCancelTarget(r)}><Ban className="h-4 w-4" /></IconButton>}
+                  </div></td>
+                )}
+              </tr>
+            ))}
+            {/* HÀNG ĐỆM: hàng TỔNG ghim đáy nổi TRÊN nội dung nên che mất dòng cuối khi cuộn tới đáy. */}
+            <tr aria-hidden className="h-full"><td colSpan={soCot} className="h-9" /></tr>
+          </tbody>
+          <tfoot className="sticky bottom-0 z-10">
+            <tr className="border-t-2 border-brand">
+              <td className={tdTongChuan + ' font-semibold text-brand-deep'} colSpan={soCotTruocTien}>TỔNG {rows.length} phiếu</td>
+              <td className={tdTongChuan + ' text-right font-bold tabular-nums text-slate-800'}>{tienBang(tongTien)}</td>
+              <td className={tdTongChuan} colSpan={soCotSauTien} />
+            </tr>
+          </tfoot>
+        </table>
+      </KhungBang>
+
+      {form && <CashEntryForm kind={kind} cats={kindCats} funds={funds} users={users} partners={partners} onClose={() => setForm(false)} onSaved={() => { setForm(false); void reload(); }} />}
+      {cancelTarget && <CancelEntryModal entry={cancelTarget} isThu={isThu} onClose={() => setCancelTarget(null)} onDone={() => { setCancelTarget(null); void reload(); }} />}
+      {bulkOpen && <BulkCancelEntryModal entries={selectedRows} isThu={isThu} onClose={() => setBulkOpen(false)} onDone={() => { setBulkOpen(false); void reload(); }} />}
+    </div>
+  );
+}
+
+/** Hủy hàng loạt phiếu thu/chi: nhập lý do + mật khẩu MỘT lần, gọi cashEntryCancel từng phiếu (mỗi
+ *  phiếu = 1 transaction backend, tự re-check quyền + sourceType). Báo cáo TRUNG THỰC số hủy được / bỏ qua. */
+function BulkCancelEntryModal({ entries, isThu, onClose, onDone }: { entries: CashEntryDto[]; isThu: boolean; onClose: () => void; onDone: () => void }): JSX.Element {
+  const toast = useToast();
+  const [reason, setReason] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const total = entries.reduce((s, e) => s + e.amount, 0);
+
+  async function run(): Promise<void> {
+    if (!reason.trim()) return toast.alert('Vui lòng nhập lý do hủy phiếu.', 'Thiếu lý do');
+    if (!password) return;
+    setBusy(true);
+    let done = 0;
+    const failed: string[] = [];
+    for (const e of entries) {
+      const res = await window.api.cashEntryCancel(e.id, reason.trim(), password);
+      if (res.ok) done++;
+      else failed.push(`${e.code ?? '#' + e.id}: ${res.message ?? res.error}`);
+    }
+    setBusy(false);
+    if (done > 0) toast.success(`Đã hủy ${done}/${entries.length} phiếu ${isThu ? 'thu' : 'chi'}.`);
+    if (failed.length) toast.alert(`Bỏ qua ${failed.length} phiếu:\n${failed.slice(0, 8).join('\n')}`, 'Kết quả hủy hàng loạt');
+    onDone();
+  }
+
+  return (
+    <Modal title={`Hủy ${entries.length} phiếu ${isThu ? 'thu' : 'chi'} đã chọn`} onClose={onClose} width="max-w-md">
+      <p className="text-sm text-slate-600">Tổng tiền <b className="tabular-nums">{money(total)}</b>. Phiếu đã hủy không còn tính vào số dư quỹ. Mỗi phiếu ghi nhật ký riêng; phiếu sinh từ nghiệp vụ khác sẽ bị bỏ qua.</p>
+      <Field label="Lý do hủy" required><textarea className={inputCls} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} autoFocus /></Field>
+      <label className="mt-2 flex flex-col gap-1.5">
+        <span className="text-sm font-medium text-slate-700">Nhập lại mật khẩu để xác nhận</span>
+        <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && run()} placeholder="Mật khẩu của bạn" />
+      </label>
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="neutral" onClick={onClose}>Đóng</Button>
+        <Button variant="danger" onClick={run} disabled={busy || !password} icon={busy ? <Loader2 className="h-4 w-4 animate-spin" /> : undefined}>Hủy {entries.length} phiếu</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function CashEntryForm({ kind, cats, funds, users, partners, onClose, onSaved }: { kind: 'THU' | 'CHI'; cats: EntryCategoryLite[]; funds: FundDto[]; users: CashflowUserLite[]; partners: CashPartnerLite[]; onClose: () => void; onSaved: () => void }): JSX.Element {
+  const toast = useToast();
+  const isThu = kind === 'THU';
+  // Danh mục cho phép lập phiếu (H2-core chặn công nợ DEBT_*).
+  const selectable = cats.filter((c) => c.sourceKind !== 'DEBT_CUSTOMER' && c.sourceKind !== 'DEBT_PARTNER');
+  const [categoryId, setCategoryId] = useState<string>(selectable[0] ? String(selectable[0].id) : '');
+  const [fundId, setFundId] = useState<string>(funds[0] ? String(funds[0].id) : '');
+  const [amount, setAmount] = useState('');
+  const [method, setMethod] = useState('CASH');
+  const [entryDate, setEntryDate] = useState(todayStr());
+  const [payerUserId, setPayerUserId] = useState('');
+  const [receiverUserId, setReceiverUserId] = useState('');
+  // "Của ai" (mục D): '' = không chọn · số = id đối tác trong danh sách · '__other__' = nhập tay (partnerText).
+  const [partnerSel, setPartnerSel] = useState('');
+  const [partnerText, setPartnerText] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function save(): Promise<void> {
+    // [B332/SV1 24/11 — agent soát] chặn double-submit: Enter 2 lần nhanh (Modal onSubmit) có thể lọt cả
+    // hai trước khi `busy` (state bất đồng bộ) cập nhật ⇒ 2 phiếu thu/chi, quỹ tăng gấp đôi. Gác ngay đầu.
+    if (busy) return;
+    const amt = Number(amount);
+    if (!Number.isInteger(amt) || amt <= 0) return toast.alert('Số tiền phải là số nguyên dương (VND).', 'Số tiền không hợp lệ');
+    if (!categoryId) return toast.alert('Vui lòng chọn danh mục.', 'Thiếu danh mục');
+    if (!fundId) return toast.alert('Vui lòng chọn quỹ.', 'Thiếu quỹ');
+    if (!isThu && !payerUserId) return toast.alert('Phiếu chi bắt buộc chọn người chi.', 'Thiếu người chi');
+    // "Của ai": chọn danh sách → partnerId; nhập tay → partnerText; loại trừ nhau (khớp backend).
+    const isOther = partnerSel === '__other__';
+    const partnerId = isOther || !partnerSel ? null : Number(partnerSel);
+    const partnerTextOut = isOther ? partnerText.trim() || null : null;
+    setBusy(true);
+    const input: CreateCashEntryInput = {
+      kind, categoryId: Number(categoryId), fundId: Number(fundId), amount: amt, method, entryDate,
+      partnerId, partnerText: partnerTextOut,
+      payerUserId: payerUserId ? Number(payerUserId) : null,
+      receiverUserId: receiverUserId ? Number(receiverUserId) : null,
+      note: note.trim() || null
+    };
+    const res = await window.api.cashEntryCreate(input);
+    setBusy(false);
+    if (res.ok) { toast.success(isThu ? 'Đã lập phiếu thu' : 'Đã lập phiếu chi'); onSaved(); }
+    else toast.alert(res.message ?? 'Lưu thất bại', 'Không lập được phiếu');
+  }
+
+  return (
+    <Modal title={isThu ? 'Lập phiếu thu' : 'Lập phiếu chi'} onClose={onClose} width="max-w-lg" onSubmit={() => void save()}>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Danh mục" required>
+          <select className={inputCls} value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
+            {selectable.length === 0 && <option value="">(chưa có danh mục)</option>}
+            {selectable.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Quỹ" required>
+          <select className={inputCls} value={fundId} onChange={(e) => setFundId(e.target.value)}>
+            {funds.length === 0 && <option value="">(chưa có quỹ)</option>}
+            {funds.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Số tiền (VND)" required hint="Số nguyên đồng, không nhân 1000."><input className={inputCls + ' text-right tabular-nums'} inputMode="numeric" value={groupDigits(amount)} onChange={(e) => setAmount(e.target.value.replace(/[^\d]/g, ''))} autoFocus /></Field>
+        <Field label="Hình thức" required>
+          <select className={inputCls} value={method} onChange={(e) => setMethod(e.target.value)}>
+            <option value="CASH">Tiền mặt</option>
+            <option value="CK">Chuyển khoản</option>
+          </select>
+        </Field>
+        <Field label="Ngày" required><input className={inputCls} type="date" value={entryDate} onChange={(e) => setEntryDate(e.target.value)} /></Field>
+        {isThu ? (
+          <Field label="Người nhận (thu hộ)" hint="Tùy chọn.">
+            <select className={inputCls} value={receiverUserId} onChange={(e) => setReceiverUserId(e.target.value)}>
+              <option value="">— Không chỉ định —</option>
+              {users.map((u) => <option key={u.id} value={u.id}>{u.code ? `${u.code} · ` : ''}{u.name}</option>)}
+            </select>
+          </Field>
+        ) : (
+          <Field label="Người chi" required hint="Bắt buộc — chọn nhân sự chi tiền.">
+            <select className={inputCls} value={payerUserId} onChange={(e) => setPayerUserId(e.target.value)}>
+              <option value="">— Chọn người chi —</option>
+              {users.map((u) => <option key={u.id} value={u.id}>{u.code ? `${u.code} · ` : ''}{u.name}</option>)}
+            </select>
+          </Field>
+        )}
+      </div>
+      <Field label={isThu ? 'Thu của ai (đối tác)' : 'Chi cho ai (đối tác)'} hint="Tùy chọn. Chọn từ danh sách đối tác, hoặc 'Khác' để nhập tay đối tác lẻ.">
+        <select className={inputCls} value={partnerSel} onChange={(e) => setPartnerSel(e.target.value)}>
+          <option value="">— Không chọn —</option>
+          {partners.map((p) => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+          <option value="__other__">Khác (nhập tay)…</option>
+        </select>
+        {partnerSel === '__other__' && (
+          <input className={inputCls} value={partnerText} onChange={(e) => setPartnerText(e.target.value)} placeholder="Nhập tên đối tác / đối tượng" autoFocus />
+        )}
+      </Field>
+      <Field label="Ghi chú"><input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="neutral" onClick={onClose}>Hủy</Button>
+        <Button variant="confirm" onClick={save} disabled={busy} icon={busy ? <Loader2 className="h-4 w-4 animate-spin" /> : undefined}>{isThu ? 'Lập phiếu thu' : 'Lập phiếu chi'}</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function CancelEntryModal({ entry, isThu, onClose, onDone }: { entry: CashEntryDto; isThu: boolean; onClose: () => void; onDone: () => void }): JSX.Element {
+  const toast = useToast();
+  const [reason, setReason] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function run(): Promise<void> {
+    if (!reason.trim()) return toast.alert('Vui lòng nhập lý do hủy phiếu.', 'Thiếu lý do');
+    if (!password) return;
+    setBusy(true);
+    const res = await window.api.cashEntryCancel(entry.id, reason.trim(), password);
+    setBusy(false);
+    if (res.ok) { toast.success(`Đã hủy phiếu ${entry.code ?? entry.id}`); onDone(); }
+    else toast.alert(res.message ?? 'Hủy thất bại', 'Không hủy được phiếu');
+  }
+
+  return (
+    <Modal title={`Hủy phiếu ${isThu ? 'thu' : 'chi'} ${entry.code ?? ''}`} onClose={onClose} width="max-w-md">
+      <p className="text-sm text-slate-600">Phiếu đã hủy sẽ không còn tính vào số dư quỹ. Thao tác được ghi nhật ký.</p>
+      <Field label="Lý do hủy" required><textarea className={inputCls} rows={2} value={reason} onChange={(e) => setReason(e.target.value)} autoFocus /></Field>
+      <label className="mt-2 flex flex-col gap-1.5">
+        <span className="text-sm font-medium text-slate-700">Nhập lại mật khẩu để xác nhận</span>
+        <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && run()} placeholder="Mật khẩu của bạn" />
+      </label>
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="neutral" onClick={onClose}>Đóng</Button>
+        <Button variant="danger" onClick={run} disabled={busy || !password} icon={busy ? <Loader2 className="h-4 w-4 animate-spin" /> : undefined}>Hủy phiếu</Button>
+      </div>
+    </Modal>
+  );
+}

@@ -1,0 +1,673 @@
+// Bill giải trình (Admin Demo 16/7) — 3 tab: Tạo bill · Theo dõi · Thư viện sản phẩm.
+// Tạo bill: chọn HKD (hồ sơ) + TID (chỉ theo dõi, KHÔNG in) + ngành → nhập NHIỀU số tiền trực tiếp (add/xóa dòng)
+// hoặc import danh sách số tiền → XÁC NHẬN trước khi sinh → xuất .xlsx → mở file. Người bán = chủ hộ HKD.
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { CanhBaoCatDanhSach } from '../components/CanhBaoCatDanhSach.js';
+import { FileText, Plus, Trash2, Loader2, Download, Upload, FileUp, FolderKanban, FolderOpen, ListChecks, Play, X, Pencil, RefreshCw, FileCog } from 'lucide-react';
+import type { AuthUser } from '@sigma/shared';
+import { hasPermission, fmtDate, groupDigits } from '@sigma/shared';
+import type { ProductDto, BillExplainDto, IndustryDto, DossierDto, ConfigTidDto, BillExplainConfigDto } from '../../../preload/index.d';
+import { useToast } from '../lib/toast.js';
+import { isStaleWrite, STALE_TITLE } from '../lib/optlock.js';
+import { Modal } from '../components/Modal.js';
+import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import { Field, inputCls } from '../components/Field.js';
+import { Button } from '../components/Button.js';
+import { IconButton } from '../components/IconButton.js';
+import { SearchSelect } from '../components/SearchSelect.js';
+import { TabBar, TabButton } from '../components/Tabs.js';
+import { StatBar } from '../components/StatBar.js';
+import { FilterBar } from '../components/FilterBar.js';
+import { useRowSelection, SelectionBar } from '../components/Selection.js';
+import { thChuan, tdChuan, tdTongChuan, tdTien, trChuan, KhungBang } from '../components/BangChuan.js';
+import { parseWorkbook, downloadTemplate } from '../lib/excelImport.js';
+
+/** VND, nhóm 3 số bằng dấu chấm. Nhận number hoặc bigint (số tiền có thể lớn — không ép Number mất chữ số). */
+function money(n: number | bigint): string {
+  return soTien(n) + 'đ';
+}
+/** Nhóm 3 chữ số, KHÔNG ký hiệu tiền — dùng TRONG BẢNG (mẫu chốt 6/11 §2 bỏ ký tự đ).
+ *  Dùng `groupDigits` của @sigma/shared (nguồn duy nhất), KHÔNG toLocaleString. */
+function soTien(n: number | bigint): string {
+  const am = typeof n === 'bigint' ? n < 0n : n < 0;
+  const v = typeof n === 'bigint' ? (n < 0n ? -n : n) : Math.abs(Math.round(n));
+  return (am ? '−' : '') + groupDigits(v.toString());
+}
+
+/** MẪU CHỐT 6/11: trang nằm trong `<main overflow-auto>` nên khung bảng phải KHÓA chiều cao để
+ *  `overflow-auto` tạo khung cuộn thật — nhờ đó tiêu đề `sticky top-0` + hàng TỔNG `sticky bottom-0`
+ *  ghim TRONG bảng. 15rem = giữ đúng chiều cao cũ của `.list-scroll`. */
+const CAO_KHUNG = 'max-h-[calc(100vh-15rem)] bg-white shadow-sm';
+
+/** Ô tích CHỌN TẤT CẢ / 1 dòng theo KIỂU CHUẨN. Không dùng SelectAllCell/SelectCell vì 2 component dùng
+ *  chung đó còn mang chuỗi class tự chế (px-4 py-3, không nền) ⇒ hở nền giữa hàng tiêu đề xám. Đợt này
+ *  không được sửa file ngoài nhóm B; đề xuất bổ sung prop class đã ghi trong báo cáo. */
+function ThTich({ ids, sel }: { ids: number[]; sel: ReturnType<typeof useRowSelection> }): JSX.Element {
+  const allOn = ids.length > 0 && ids.every((id) => sel.isSelected(id));
+  return (
+    <th className={thChuan + ' w-9 !px-1.5'}>
+      <input type="checkbox" className="accent-brand" checked={allOn} aria-label="Chọn tất cả" onChange={(e) => sel.setAll(ids, e.target.checked)} />
+    </th>
+  );
+}
+function TdTich({ id, sel }: { id: number; sel: ReturnType<typeof useRowSelection> }): JSX.Element {
+  return (
+    <td className={tdChuan + ' !px-1.5 text-center'}>
+      <input type="checkbox" className="accent-brand" checked={sel.isSelected(id)} aria-label={`Chọn dòng ${id}`} onChange={() => sel.toggle(id)} />
+    </td>
+  );
+}
+function todayISO(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export function BillExplainPage({ user }: { user: AuthUser }): JSX.Element {
+  const canCreate = hasPermission(user, 'BILLEXPLAIN_CREATE');
+  const canManageProduct = hasPermission(user, 'PRODUCT_MANAGE');
+  const canDelete = hasPermission(user, 'BILLEXPLAIN_DELETE');
+  const [tab, setTab] = useState<'create' | 'track' | 'library'>(canCreate ? 'create' : 'track');
+  return (
+    // MẪU CHỐT 6/11: `data-nut-vuong` ở thẻ bọc NGOÀI CÙNG để trang ăn luật nút/thanh cuộn/màu của mau-moi.css.
+    <div data-nut-vuong data-trang-full>
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold text-slate-800">Bill Giải Trình</h2>
+        <p className="text-sm text-slate-500">Sinh hóa đơn giải trình số tiền theo HKD · ngành nghề · thư viện sản phẩm riêng.</p>
+      </div>
+      <TabBar>
+        {canCreate && <TabButton active={tab === 'create'} onClick={() => setTab('create')} icon={<Play className="h-4 w-4" />}>Tạo bill</TabButton>}
+        <TabButton active={tab === 'track'} onClick={() => setTab('track')} icon={<ListChecks className="h-4 w-4" />}>Theo dõi</TabButton>
+        <TabButton active={tab === 'library'} onClick={() => setTab('library')} icon={<FolderKanban className="h-4 w-4" />}>Thư viện sản phẩm</TabButton>
+      </TabBar>
+      {tab === 'create' && canCreate && <CreateBillTab />}
+      {tab === 'track' && <TrackTab canDelete={canDelete} />}
+      {tab === 'library' && <LibraryTab canManage={canManageProduct} />}
+    </div>
+  );
+}
+
+// ═══ TAB 1 — TẠO BILL ═══════════════════════════════════════════════════════════
+function CreateBillTab(): JSX.Element {
+  const toast = useToast();
+  const [dossiers, setDossiers] = useState<DossierDto[]>([]);
+  const [tids, setTids] = useState<ConfigTidDto[]>([]);
+  const [industries, setIndustries] = useState<IndustryDto[]>([]);
+  const [cfg, setCfg] = useState<BillExplainConfigDto | null>(null);
+
+  const [dossierId, setDossierId] = useState('');
+  const [tidId, setTidId] = useState('');
+  const [industryId, setIndustryId] = useState('');
+  const [billDate, setBillDate] = useState(todayISO());
+  const [amounts, setAmounts] = useState<string[]>(['']);
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const [result, setResult] = useState<{ id: number; file: string; totalBills: number; errors?: { index: number; target: number; error: string }[] } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try { // FE53-05: 1 IPC reject KHÔNG được để unhandled + selector trống câm lặng.
+        const [d, t, i, c] = await Promise.all([window.api.dossierList({}), window.api.tidConfigList({}), window.api.industryList({ active: true }), window.api.billExplainConfig()]);
+        if (d.ok && d.data) setDossiers(d.data);
+        if (t.ok && t.data) setTids(t.data);
+        if (i.ok && i.data) setIndustries(i.data);
+        if (c.ok && c.data) setCfg(c.data);
+      } catch (err) {
+        toast.alert(err instanceof Error ? err.message : 'Không tải được dữ liệu cho trang.', 'Lỗi tải');
+      }
+    })();
+  }, [toast]);
+
+  // FE53-04: GỬI chuỗi chữ số RAW (không qua Number ở FE → không mất chữ số); backend parse STRICT.
+  const validRawAmounts = useMemo(() => amounts.map((a) => a.replace(/[^\d]/g, '').replace(/^0+/, '')).filter((s) => s !== ''), [amounts]);
+  const validAmounts = validRawAmounts; // dùng cho đếm; tổng tính bằng BigInt bên dưới
+  const total = validRawAmounts.reduce((s, n) => s + BigInt(n), 0n);
+  // Trần thực tế 1 hóa đơn = 299tr (Admin Demo 16/7: KHÔNG tách HĐ; số > 299tr sẽ bị backend từ chối). Cảnh báo
+  // NGAY trên form (theo từng dòng + chặn nút Sinh bill) để tránh lỗi khi sinh — thay vì để backend báo lỗi.
+  const REAL_CEILING = 299_000_000n;
+  const overCeil = useMemo(() => {
+    const s = new Set<number>();
+    amounts.forEach((a, i) => { const d = a.replace(/[^\d]/g, '').replace(/^0+/, ''); if (d && BigInt(d) > REAL_CEILING) s.add(i); });
+    return s;
+  }, [amounts]);
+  const dossier = dossiers.find((d) => String(d.id) === dossierId);
+  const industry = industries.find((i) => String(i.id) === industryId);
+  // Tên HKD hiển thị: ưu tiên Hồ sơ đã chọn, nếu không có Hồ sơ thì dùng tên HKD của TID (Admin Demo 21/8).
+  const selectedTid = tids.find((t) => String(t.id) === tidId);
+  const hkdDisplayName = dossier?.hkdName ?? selectedTid?.hkdName ?? '';
+
+  function setAmountAt(idx: number, v: string): void {
+    setAmounts((prev) => prev.map((a, i) => (i === idx ? v.replace(/[^\d]/g, '') : a)));
+  }
+  function addAmount(): void { setAmounts((prev) => [...prev, '']); }
+  function removeAmount(idx: number): void { setAmounts((prev) => (prev.length <= 1 ? [''] : prev.filter((_, i) => i !== idx))); }
+
+  async function onImportAmounts(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const res = await parseWorkbook(file);
+    if (!res.ok || !res.rows) { toast.alert(res.error ?? 'Không đọc được file.', 'Lỗi đọc file'); return; }
+    // Lấy CỘT SỐ TIỀN: ưu tiên header chứa "tiền"/"số tiền"/"amount"; nếu không có → cột số đầu tiên.
+    const nums: string[] = [];
+    for (const row of res.rows) {
+      const keys = Object.keys(row);
+      const moneyKey = keys.find((k) => /tiền|so tien|amount|thành tiền/i.test(k)) ?? keys.find((k) => Number(String(row[k]).replace(/[^\d]/g, '')) > 0);
+      if (!moneyKey) continue;
+      // GIỮ chuỗi digit-raw (KHÔNG qua Number — bất biến FE53-04/BILL-05): Number làm số ≥1e21 thành "1e+21"
+      // → strip còn "121" → sai giá trị + né trần 299tr (agent review 16/7). Sanitize y như nhập tay.
+      const d = String(row[moneyKey]).replace(/[^\d]/g, '').replace(/^0+/, '');
+      if (d) nums.push(d);
+    }
+    if (!nums.length) { toast.alert('File không có số tiền hợp lệ.', 'Không có dữ liệu'); return; }
+    setAmounts((prev) => { const base = prev.filter((a) => a.trim()); return [...base, ...nums]; });
+    toast.success(`Đã nạp ${nums.length} số tiền từ file.`);
+  }
+
+  function openConfirm(): void {
+    // HKD (Admin Demo 21/8): dùng Hồ sơ HKD HOẶC tên HKD của TID — cần ít nhất 1.
+    if (!dossierId && !tidId) { toast.alert('Chọn Hộ Kinh Doanh hoặc chọn TID (dùng tên HKD của TID).', 'Thiếu thông tin'); return; }
+    if (!industryId) { toast.alert('Chọn nhóm ngành nghề.', 'Thiếu thông tin'); return; }
+    if (!validAmounts.length) { toast.alert('Nhập ít nhất 1 số tiền cần giải trình.', 'Thiếu số tiền'); return; }
+    if (overCeil.size) { toast.alert('Mỗi hóa đơn tối đa 299.000.000đ (không tách hóa đơn). Vui lòng sửa các dòng đang bôi đỏ trước khi sinh.', 'Số tiền vượt trần'); return; }
+    setConfirm(true);
+  }
+  async function doGenerate(): Promise<void> {
+    setConfirm(false);
+    setBusy(true);
+    setResult(null);
+    try {
+      const res = await window.api.billExplainGenerate({ dossierId: dossierId ? Number(dossierId) : null, tidId: tidId ? Number(tidId) : null, industryId: Number(industryId), billDate, targets: validRawAmounts });
+      if (res.ok && res.file) {
+        setResult({ id: res.id!, file: res.file, totalBills: res.totalBills ?? 0, errors: res.errors });
+        toast.success(`Đã sinh ${res.totalBills} bill.`);
+        const c = await window.api.billExplainConfig();
+        if (c.ok && c.data) setCfg(c.data);
+      } else {
+        toast.alert(res.message ?? 'Sinh bill thất bại.', 'Lỗi sinh bill');
+      }
+    } catch (err) {
+      toast.alert(err instanceof Error ? err.message : 'Lỗi kết nối máy chủ.', 'Lỗi');
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function openResultFile(): Promise<void> {
+    if (!result) return;
+    const o = await window.api.billExplainOpenFile(result.file);
+    if (!o.ok) toast.alert(o.message ?? 'Không mở được file.', 'Không mở được file');
+  }
+  async function openResultFolder(): Promise<void> {
+    const o = await window.api.billExplainOpenFolder();
+    if (!o.ok) toast.alert(o.message ?? 'Không mở được thư mục.', 'Không mở được thư mục');
+  }
+
+  const dossierOptions = dossiers.map((d) => ({ value: String(d.id), label: `${d.hkdName}${d.taxCode ? ' · ' + d.taxCode : ''}` }));
+  const tidOptions = tids.map((t) => ({ value: String(t.id), label: `${t.tid}${t.hkdName ? ' · ' + t.hkdName : ''}` }));
+  const industryOptions = industries.map((i) => ({ value: String(i.id), label: i.name }));
+
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="lg:col-span-2 rounded-xl border border-line bg-white p-4 shadow-sm">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {/* HKD: chọn Hồ sơ HKD HOẶC để trống rồi chọn TID (dùng tên HKD của TID — Admin Demo 21/8). Không còn bắt buộc. */}
+          <Field label="Hộ Kinh Doanh (hoặc lấy theo TID)"><SearchSelect value={dossierId} onChange={setDossierId} options={dossierOptions} placeholder="— Chọn HKD (hoặc để trống, lấy theo TID) —" /></Field>
+          <Field label="Ngành nghề" required><SearchSelect value={industryId} onChange={setIndustryId} options={industryOptions} placeholder="— Chọn ngành —" /></Field>
+          {/* Bill giải trình (Admin Demo 21/8): chọn TID → TỰ điền HKD (Tid.dossierId) + Ngành (Tid.industryId) — vẫn
+              sửa tay được. TID chưa gắn HKD/ngành thì giữ nguyên lựa chọn hiện tại (không xóa). */}
+          <Field label="TID (chỉ để theo dõi, không in lên hóa đơn)"><SearchSelect value={tidId} onChange={(v) => {
+            setTidId(v);
+            const t = tids.find((x) => String(x.id) === v);
+            if (!t) return;
+            if (t.industryId != null) setIndustryId(String(t.industryId)); // ngành nghề tự link theo TID
+            // HKD tự hiện theo TID: ưu tiên link dossierId; TID chưa link (thực tế đa số dossierId=null) → khớp Hồ sơ
+            // theo TÊN HKD của TID (Tid.hkdName == Dossier.hkdName). Không khớp → giữ lựa chọn hiện tại (chọn tay).
+            if (t.dossierId != null) setDossierId(String(t.dossierId));
+            else if (t.hkdName) { const d = dossiers.find((x) => x.hkdName === t.hkdName); if (d) setDossierId(String(d.id)); }
+          }} options={tidOptions} placeholder="— Không gắn TID —" /></Field>
+          <Field label="Ngày hóa đơn"><input type="date" className={inputCls} value={billDate} onChange={(e) => setBillDate(e.target.value)} /></Field>
+        </div>
+        {dossier ? (
+          <div className="mt-2 rounded-lg bg-appbg px-3 py-2 text-xs text-slate-500">
+            Người bán (chủ hộ): <span className="font-medium text-slate-700">{dossier.ownerName || '—'}</span> · Địa chỉ: <span className="text-slate-600">{dossier.hkdAddress || '—'}</span>
+          </div>
+        ) : selectedTid?.hkdName ? (
+          <div className="mt-2 rounded-lg bg-appbg px-3 py-2 text-xs text-slate-500">
+            HKD (theo TID): <span className="font-medium text-slate-700">{selectedTid.hkdName}</span> · Chủ hộ + địa chỉ: <span className="text-slate-600">— (chưa có Hồ sơ HKD)</span>
+          </div>
+        ) : null}
+
+        <div className="mt-4 mb-2 flex items-center justify-between">
+          <div className="text-sm font-semibold text-slate-700">Số tiền cần giải trình <span className="text-slate-400">({validAmounts.length} bill)</span></div>
+          <div data-kiem="thanh-cong-cu" className="grid shrink-0 grid-flow-col auto-cols-fr gap-2">
+            <Button data-nut="nhap" variant="soft" size="xs" icon={<FileUp className="h-4 w-4" />} onClick={() => fileRef.current?.click()}>Nhập từ file</Button>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={onImportAmounts} />
+            <Button data-nut="them" variant="confirm" size="xs" icon={<Plus className="h-4 w-4" />} onClick={addAmount}>Thêm số tiền</Button>
+          </div>
+        </div>
+        <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+          {amounts.map((a, idx) => (
+            <div key={idx}>
+              <div className="flex items-center gap-2">
+                <span className="w-7 text-right text-xs text-slate-400">{idx + 1}.</span>
+                <input className={inputCls + ' text-right tabular-nums' + (overCeil.has(idx) ? ' border-danger focus:border-danger' : '')} inputMode="numeric" value={groupDigits(a)} onChange={(e) => setAmountAt(idx, e.target.value)} placeholder="0" />
+                <span className="text-xs text-slate-400">đ</span>
+                <IconButton title="Xóa dòng" tone="danger" onClick={() => removeAmount(idx)}><X className="h-4 w-4" /></IconButton>
+              </div>
+              {overCeil.has(idx) && (
+                <div className="ml-9 mt-0.5 text-xs text-danger">Vượt trần 299.000.000đ — 1 hóa đơn không quá 299tr (không tách hóa đơn).</div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 flex items-center justify-between border-t border-line pt-3">
+          <div className="text-sm text-slate-600">Tổng: <span className="text-lg font-bold text-brand tabular-nums">{money(total)}</span></div>
+          <Button variant="confirm" icon={busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />} onClick={openConfirm} disabled={busy || overCeil.size > 0}>Sinh bill</Button>
+        </div>
+      </div>
+
+      {/* Cột phải: template + kết quả */}
+      <div className="space-y-4">
+        <TemplatePanel cfg={cfg} onChanged={async () => { const c = await window.api.billExplainConfig(); if (c.ok && c.data) setCfg(c.data); }} />
+        {result && (
+          <div className="rounded-xl border border-success/30 bg-success/5 p-4 shadow-sm">
+            <div className="mb-1 text-sm font-semibold text-success">Đã sinh {result.totalBills} bill</div>
+            <div className="mb-2 break-all text-xs text-slate-500">{result.file}</div>
+            {result.errors && result.errors.length > 0 && (
+              <div className="mb-2 rounded-md bg-warning/10 px-2 py-1.5 text-xs text-warning">{result.errors.length} số tiền không khớp được tổ hợp SP (bỏ qua).</div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button variant="confirm" icon={<FileText className="h-4 w-4" />} onClick={openResultFile}>Mở file</Button>
+              <Button variant="soft" icon={<FolderOpen className="h-4 w-4" />} onClick={openResultFolder}>Mở thư mục</Button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {confirm && (
+        <Modal title="Xác nhận sinh bill" onClose={() => setConfirm(false)}>
+          <div className="space-y-2 text-sm text-slate-600">
+            <div>HKD: <span className="font-medium text-slate-800">{hkdDisplayName || '—'}</span></div>
+            <div>Ngành nghề: <span className="font-medium text-slate-800">{industry?.name}</span></div>
+            <div>Số bill: <span className="font-medium text-slate-800">{validAmounts.length}</span> · Tổng: <span className="font-bold text-brand">{money(total)}</span></div>
+            <div>Ngày HĐ: <span className="font-medium text-slate-800">{fmtDate(billDate)}</span></div>
+            <div className="rounded-md bg-appbg px-3 py-2 text-xs text-slate-500">Hệ thống sẽ sinh {validAmounts.length} hóa đơn khớp đúng từng số tiền, xuất file Excel.</div>
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="soft" onClick={() => setConfirm(false)}>Hủy</Button>
+            <Button variant="confirm" onClick={doGenerate}>Xác nhận sinh</Button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function TemplatePanel({ cfg, onChanged }: { cfg: BillExplainConfigDto | null; onChanged: () => void }): JSX.Element {
+  const toast = useToast();
+  async function importTpl(): Promise<void> {
+    const res = await window.api.billExplainImportTemplate();
+    if (res.ok) { toast.success('Đã đặt mẫu hóa đơn riêng.'); onChanged(); }
+    else if (res.error !== 'CANCELLED') toast.alert(res.message ?? 'Import mẫu thất bại.', 'Lỗi');
+  }
+  async function exportTpl(): Promise<void> {
+    const res = await window.api.billExplainExportTemplate();
+    if (res.ok && res.file) toast.success('Đã xuất mẫu: ' + res.file);
+    else if (res.error !== 'CANCELLED') toast.alert(res.message ?? 'Xuất mẫu thất bại.', 'Lỗi');
+  }
+  async function resetTpl(): Promise<void> {
+    const res = await window.api.billExplainResetTemplate();
+    if (res.ok) { toast.success('Đã về mẫu mặc định.'); onChanged(); }
+    else toast.alert(res.message ?? 'Lỗi', 'Lỗi');
+  }
+  return (
+    <div className="rounded-xl border border-line bg-white p-4 shadow-sm">
+      <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><FileCog className="h-4 w-4 text-brand" /> Mẫu hóa đơn</div>
+      <div className="mb-3 text-xs text-slate-500">Đang dùng: <span className="font-medium text-slate-700">{cfg?.templateIsCustom ? 'Mẫu riêng đã import' : 'Mẫu mặc định'}</span></div>
+      <div className="flex flex-wrap gap-2">
+        <Button data-nut="nhap" variant="soft" size="xs" icon={<Upload className="h-4 w-4" />} onClick={importTpl}>Import mẫu</Button>
+        <Button data-nut="excel" variant="soft" size="xs" icon={<Download className="h-4 w-4" />} onClick={exportTpl}>Xuất mẫu</Button>
+        {cfg?.templateIsCustom && <Button variant="soft" size="xs" icon={<RefreshCw className="h-4 w-4" />} onClick={resetTpl}>Về mặc định</Button>}
+      </div>
+    </div>
+  );
+}
+
+// ═══ TAB 2 — THEO DÕI ═══════════════════════════════════════════════════════════
+function TrackTab({ canDelete }: { canDelete: boolean }): JSX.Element {
+  const toast = useToast();
+  const [rows, setRows] = useState<BillExplainDto[]>([]);
+  const [tongDs, setTongDs] = useState<number | null>(null); // [B331]
+  const [loading, setLoading] = useState(true);
+  const [bulkDel, setBulkDel] = useState(false);
+  const sel = useRowSelection();
+
+  async function reload(): Promise<void> {
+    setLoading(true);
+    try {
+      const res = await window.api.billExplainList({});
+      if (res.ok && res.data) { setRows(res.data); setTongDs(res.total ?? null); }
+      else if (res.message) toast.alert(res.message);
+    } catch (e) {
+      toast.alert(e instanceof Error ? e.message : 'Không tải được dữ liệu.', 'Lỗi tải');
+    } finally {
+      sel.clear();
+      setLoading(false);
+    }
+  }
+  useEffect(() => { void reload(); /* eslint-disable-next-line */ }, []);
+
+  async function openFile(filePath: string): Promise<void> {
+    const o = await window.api.billExplainOpenFile(filePath);
+    if (!o.ok) toast.alert(o.message ?? 'Không mở được file.', 'Không mở được file');
+  }
+  async function openFolder(): Promise<void> {
+    const o = await window.api.billExplainOpenFolder();
+    if (!o.ok) toast.alert(o.message ?? 'Không mở được thư mục.', 'Không mở được thư mục');
+  }
+  async function doBulkDelete(password?: string): Promise<void> {
+    const res = await window.api.billExplainDelete([...sel.selected], password ?? '');
+    if (res.ok) toast.success(`Đã xóa ${res.deleted ?? sel.count} bill.`);
+    else toast.alert(res.message ?? 'Xóa thất bại', 'Xóa thất bại');
+    setBulkDel(false); await reload();
+  }
+
+  // Ô tích + 8 cột dữ liệu + Thao tác.
+  const soCot = 9 + (canDelete ? 1 : 0);
+  // Tổng cộng từ CHÍNH mảng đang hiện (mẫu chốt 6/11 §5).
+  const tongTien = rows.reduce((s, r) => s + (Number.isFinite(r.totalAmount) ? r.totalAmount : 0), 0);
+  const tongBill = rows.reduce((s, r) => s + (Number.isFinite(r.billCount) ? r.billCount : 0), 0);
+
+  return (
+    <div data-nut-vuong>
+      <div className="mb-3 flex items-center justify-between">
+        <div className="text-sm text-slate-500">{rows.length} lần sinh bill</div>
+        <div data-kiem="thanh-cong-cu" className="grid shrink-0 grid-flow-col auto-cols-fr gap-2">
+          <Button variant="soft" icon={<FolderOpen className="h-4 w-4" />} onClick={openFolder}>Mở thư mục chứa bill</Button>
+          <Button data-nut="lammoi" variant="soft" icon={<RefreshCw className="h-4 w-4" />} onClick={() => void reload()}>Làm mới</Button>
+        </div>
+      </div>
+      <StatBar items={[{ label: 'Tổng lần sinh', value: rows.length, tone: 'bg-brand-tint text-brand' }, { label: 'Tổng bill', value: rows.reduce((s, r) => s + r.billCount, 0), tone: 'bg-emerald-500/10 text-emerald-600' }]} />
+      {canDelete && <SelectionBar count={sel.count} entityLabel="bill" onClear={sel.clear} onDelete={() => setBulkDel(true)} />}
+      <CanhBaoCatDanhSach soHienThi={rows.length} tong={tongDs} className="mb-2" />
+      <KhungBang className={CAO_KHUNG}>
+        {/* min-w: thiếu chỗ thì CUỘN NGANG, tuyệt đối KHÔNG ẩn cột theo breakpoint (mẫu chốt 6/11 §1). */}
+        <table className="w-full min-w-[1280px] text-xs">
+          <thead className="sticky top-0 z-20 text-xs uppercase tracking-wide shadow-sm">
+            <tr>
+              {canDelete && <ThTich ids={rows.map((r) => r.id)} sel={sel} />}
+              <th className={thChuan + ' w-[120px]'}>Mã</th>
+              <th className={thChuan + ' w-[100px]'}>Ngày</th>
+              <th className={thChuan + ' w-[280px]'}>HKD</th>
+              <th className={thChuan + ' w-[170px]'}>Ngành</th>
+              <th className={thChuan + ' w-[120px]'}>TID</th>
+              <th className={thChuan + ' w-[150px]'}>Tổng tiền</th>
+              <th className={thChuan + ' w-[90px]'}>Số bill</th>
+              <th className={thChuan + ' w-[140px]'}>Người tạo</th>
+              <th className={thChuan + ' w-[90px]'}>Thao tác</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <tr><td colSpan={soCot} className="px-4 py-8 text-center text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={soCot} className="px-4 py-10 text-center text-sm text-slate-400"><FileText className="mx-auto mb-2 h-6 w-6" /> Chưa có bill nào được sinh.</td></tr>}
+            {!loading && rows.map((r, i) => (
+              // SỌC NGỰA VẰN dùng chung `trChuan(i)`; dòng ĐANG TÍCH tô sáng (tham số noiBat).
+              <tr key={r.id} className={trChuan(i, sel.isSelected(r.id))}>
+                {canDelete && <TdTich id={r.id} sel={sel} />}
+                <td className={tdChuan + ' text-center font-mono font-semibold text-slate-700'}>{r.code ?? '#' + r.id}</td>
+                <td className={tdChuan + ' text-center tabular-nums text-slate-500'}>{fmtDate(r.billDate)}</td>
+                <td className={tdChuan + ' text-slate-700'} title={r.dossierName ?? ''}>{r.dossierName ?? '—'}</td>
+                <td className={tdChuan + ' text-center text-slate-600'}>{r.industryName ?? '—'}</td>
+                <td className={tdChuan + ' text-center font-mono text-slate-500'}>{r.tidCode ?? '—'}</td>
+                {/* Cột TIỀN: căn phải, tabular-nums, text-slate-800, KHÔNG in đậm, bỏ ký tự đ (mẫu chốt §2). */}
+                <td className={tdTien}>{soTien(r.totalAmount)}</td>
+                <td className={tdChuan + ' text-right tabular-nums text-slate-600'}>{r.billCount}</td>
+                <td className={tdChuan + ' text-center text-slate-600'}>{r.createdByName ?? '—'}</td>
+                <td className={tdChuan + ' text-center'}>
+                  <IconButton title="Mở file" tone="view" onClick={() => openFile(r.filePath)}><FileText className="h-4 w-4" /></IconButton>
+                </td>
+              </tr>
+            ))}
+            {/* HÀNG ĐỆM: chừa 1 hàng để dòng cuối không bị hàng TỔNG ghim đáy che khi cuộn tới đáy. */}
+            <tr aria-hidden><td colSpan={soCot} className="h-9" /></tr>
+          </tbody>
+          {/* HÀNG TỔNG ghim ĐÁY: nền đặt trên TỪNG <td> (tdTongChuan), KHÔNG trên <tr>. */}
+          <tfoot className="sticky bottom-0 z-10">
+            <tr className="border-t-2 border-brand">
+              <td className={tdTongChuan + ' font-semibold text-brand-deep'} colSpan={canDelete ? 6 : 5}>TỔNG {rows.length} lần sinh</td>
+              <td className={tdTongChuan + ' text-right font-bold tabular-nums text-slate-800'}>{soTien(tongTien)}</td>
+              <td className={tdTongChuan + ' text-right font-bold tabular-nums text-slate-800'}>{tongBill}</td>
+              <td className={tdTongChuan} colSpan={2} />
+            </tr>
+          </tfoot>
+        </table>
+      </KhungBang>
+      {bulkDel && <ConfirmDialog title="Xóa bill đã chọn" message={`Xóa ${sel.count} lần sinh bill khỏi danh sách theo dõi? (File .xlsx trên ổ đĩa KHÔNG bị xóa.)`} confirmLabel="Xóa" danger requirePassword onConfirm={doBulkDelete} onCancel={() => setBulkDel(false)} />}
+    </div>
+  );
+}
+
+// ═══ TAB 3 — THƯ VIỆN SẢN PHẨM ══════════════════════════════════════════════════
+function LibraryTab({ canManage }: { canManage: boolean }): JSX.Element {
+  const toast = useToast();
+  const [industries, setIndustries] = useState<IndustryDto[]>([]);
+  const [fIndustry, setFIndustry] = useState('');
+  const [search, setSearch] = useState('');
+  const [rows, setRows] = useState<ProductDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState<{ mode: 'create' | 'edit'; row?: ProductDto } | null>(null);
+  const [bulkDel, setBulkDel] = useState(false);
+  const sel = useRowSelection();
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function loadIndustries(): Promise<void> {
+    const res = await window.api.industryList({ active: true });
+    if (res.ok && res.data) setIndustries(res.data);
+  }
+  async function reload(): Promise<void> {
+    setLoading(true);
+    try {
+      const res = await window.api.productList({ industryId: fIndustry ? Number(fIndustry) : undefined, search: search.trim() || undefined });
+      if (res.ok && res.data) setRows(res.data);
+      else if (res.message) toast.alert(res.message);
+    } catch (e) {
+      toast.alert(e instanceof Error ? e.message : 'Không tải được danh sách sản phẩm.', 'Lỗi tải');
+    } finally {
+      sel.clear();
+      setLoading(false);
+    }
+  }
+  useEffect(() => { void loadIndustries(); }, []);
+  useEffect(() => { void reload(); /* eslint-disable-next-line */ }, [fIndustry]);
+
+  async function onImport(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!fIndustry) { toast.alert('Chọn nhóm ngành nghề trước khi import.', 'Thiếu ngành'); return; }
+    const parsed = await parseWorkbook(file);
+    if (!parsed.ok || !parsed.rows) { toast.alert(parsed.error ?? 'Không đọc được file.', 'Lỗi đọc file'); return; }
+    const rowsMapped = parsed.rows.map((r) => {
+      const keys = Object.keys(r);
+      const kName = keys.find((k) => /tên mặt hàng|tên hàng|tên sp|tên sản phẩm|tên/i.test(k));
+      const kUnit = keys.find((k) => /đvt|đơn vị/i.test(k));
+      const kPrice = keys.find((k) => /đơn giá|giá bán|giá/i.test(k));
+      const kPrio = keys.find((k) => /ưu tiên|priority/i.test(k));
+      return { name: kName ? String(r[kName]) : '', unit: kUnit ? String(r[kUnit]) : '', price: kPrice ? r[kPrice] : '', priority: kPrio ? r[kPrio] : '' };
+    });
+    try {
+      const res = await window.api.productImport(Number(fIndustry), rowsMapped);
+      if (res.ok) { toast.success(`Đã import ${res.imported ?? 0} SP (bỏ ${res.skipped ?? 0}).`); await reload(); }
+      else toast.alert(res.message ?? 'Import thất bại.', 'Lỗi import');
+    } catch (err) {
+      toast.alert(err instanceof Error ? err.message : 'Import sản phẩm thất bại.', 'Lỗi import');
+    }
+  }
+  function exportEmpty(): void {
+    void downloadTemplate([
+      { header: 'STT', required: false, kind: 'int' },
+      { header: 'Nhóm', required: false, kind: 'text', hint: 'Tên ngành nghề (tham khảo — import theo ngành đang lọc)' },
+      { header: 'Tên mặt hàng', required: true, kind: 'text' },
+      { header: 'ĐVT', required: true, kind: 'text' },
+      { header: 'Đơn giá', required: true, kind: 'money' },
+      { header: 'Ưu tiên', required: false, kind: 'int', hint: '0–1000, cao = SP hữu dụng, ưu tiên chọn (để trống = 0)' }
+    ], 'Mẫu nhập sản phẩm');
+  }
+  async function doBulkDelete(password?: string): Promise<void> {
+    const res = await window.api.productDelete([...sel.selected], password ?? '');
+    if (res.ok) toast.success(`Đã xóa ${res.deleted ?? sel.count} sản phẩm.`);
+    else toast.alert(res.message ?? 'Xóa thất bại', 'Xóa thất bại');
+    setBulkDel(false); await reload();
+  }
+
+  const industryOptions = industries.map((i) => ({ value: String(i.id), label: i.name }));
+  // Ô tích + 6 cột dữ liệu + Thao tác.
+  const soCot = 6 + (canManage ? 2 : 0);
+
+  return (
+    <div data-nut-vuong>
+      <div className="mb-3 flex flex-nowrap items-center justify-between gap-2">
+        <div className="text-sm text-slate-500">{rows.length} sản phẩm trong thư viện</div>
+        {canManage && (
+          <div data-kiem="thanh-cong-cu" className="grid shrink-0 grid-flow-col auto-cols-fr gap-2">
+            <Button data-nut="excel" variant="soft" size="sm" icon={<Download className="h-4 w-4" />} onClick={exportEmpty}>Xuất mẫu rỗng</Button>
+            <Button data-nut="nhap" variant="soft" size="sm" icon={<FileUp className="h-4 w-4" />} onClick={() => fileRef.current?.click()}>Import SP</Button>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={onImport} />
+            <Button data-nut="them" variant="confirm" size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => { if (!industries.length) { toast.alert('Cần có ít nhất 1 ngành nghề (Cấu hình ngành nghề).', 'Thiếu ngành'); return; } setForm({ mode: 'create' }); }}>Thêm sản phẩm</Button>
+          </div>
+        )}
+      </div>
+      {/* THANH LỌC dùng chung FilterBar: 1 hàng · cỡ chữ nhỏ (coChuNho) · nút Lọc căn mép phải (locPhai).
+          `debounceMs={0}` để GIỮ NGUYÊN hành vi cũ (chỉ gọi máy chủ khi Enter / bấm Lọc) — đợt này chỉ đồng
+          bộ GIAO DIỆN, không đổi số lượt gọi API. */}
+      <FilterBar
+        coChuNho
+        locPhai
+        debounceMs={0}
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Tìm tên sản phẩm / ĐVT…"
+        selects={[{ key: 'nganh', placeholder: '— Tất cả ngành —', value: fIndustry, options: industryOptions, onChange: setFIndustry }]}
+        onApply={() => void reload()}
+        onReset={() => { setSearch(''); setFIndustry(''); setTimeout(() => void reload(), 0); }}
+      />
+      <StatBar items={[{ label: 'Tổng sản phẩm', value: rows.length, tone: 'bg-brand-tint text-brand' }]} />
+      {canManage && <SelectionBar count={sel.count} entityLabel="sản phẩm" onClear={sel.clear} onDelete={() => setBulkDel(true)} />}
+      <KhungBang className={CAO_KHUNG}>
+        <table className="w-full min-w-[1120px] text-xs">
+          <thead className="sticky top-0 z-20 text-xs uppercase tracking-wide shadow-sm">
+            <tr>
+              {canManage && <ThTich ids={rows.map((r) => r.id)} sel={sel} />}
+              <th className={thChuan + ' w-[200px]'}>Ngành</th>
+              <th className={thChuan + ' w-[340px]'}>Tên sản phẩm</th>
+              <th className={thChuan + ' w-[100px]'}>ĐVT</th>
+              <th className={thChuan + ' w-[140px]'}>Đơn giá</th>
+              <th className={thChuan + ' w-[90px]'}>Ưu tiên</th>
+              <th className={thChuan + ' w-[130px]'}>Trạng thái</th>
+              {canManage && <th className={thChuan + ' w-[90px]'}>Thao tác</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <tr><td colSpan={soCot} className="px-4 py-8 text-center text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={soCot} className="px-4 py-10 text-center text-sm text-slate-400"><FolderKanban className="mx-auto mb-2 h-6 w-6" /> Chưa có sản phẩm. Thêm hoặc import để dùng khi sinh bill.</td></tr>}
+            {!loading && rows.map((r, i) => (
+              <tr key={r.id} className={trChuan(i, sel.isSelected(r.id))}>
+                {canManage && <TdTich id={r.id} sel={sel} />}
+                <td className={tdChuan + ' text-center text-slate-600'}>{r.industryName ?? '—'}</td>
+                <td className={tdChuan + ' font-medium text-slate-800'} title={r.name}>{r.name}</td>
+                <td className={tdChuan + ' text-center text-slate-600'}>{r.unit}</td>
+                <td className={tdTien}>{soTien(r.price)}</td>
+                <td className={tdChuan + ' text-right tabular-nums text-slate-500'}>{r.priority > 0 ? r.priority : '—'}</td>
+                <td className={tdChuan + ' text-center'}>
+                  <span className={'inline-flex rounded-full px-2 py-0.5 font-medium ' + (r.status === 'ACTIVE' ? 'bg-success/10 text-success' : 'bg-slate-200 text-slate-500')}>{r.status === 'ACTIVE' ? 'Đang dùng' : 'Ngừng dùng'}</span>
+                </td>
+                {canManage && (
+                  <td className={tdChuan + ' text-center'}>
+                    <div className="flex justify-center gap-1">
+                      <IconButton title="Sửa" tone="edit" onClick={() => setForm({ mode: 'edit', row: r })}><Pencil className="h-4 w-4" /></IconButton>
+                    </div>
+                  </td>
+                )}
+              </tr>
+            ))}
+            <tr aria-hidden><td colSpan={soCot} className="h-9" /></tr>
+          </tbody>
+          {/* Hàng TỔNG: CHỈ đếm số sản phẩm. Ô "Đơn giá" để TRỐNG CÓ CHỦ Ý — cộng các ĐƠN GIÁ lại là con số
+              vô nghĩa về nghiệp vụ, và đợt này cấm tự chế công thức tiền (mẫu chốt 6/11 §2). */}
+          <tfoot className="sticky bottom-0 z-10">
+            <tr className="border-t-2 border-brand">
+              <td className={tdTongChuan + ' font-semibold text-brand-deep'} colSpan={canManage ? 4 : 3}>TỔNG {rows.length} sản phẩm</td>
+              <td className={tdTongChuan} colSpan={canManage ? 4 : 3} />
+            </tr>
+          </tfoot>
+        </table>
+      </KhungBang>
+      {form && <ProductForm mode={form.mode} row={form.row} industries={industries} defaultIndustryId={fIndustry} onClose={() => setForm(null)} onSaved={() => { setForm(null); void reload(); }} />}
+      {bulkDel && <ConfirmDialog title="Xóa sản phẩm đã chọn" message={`Xóa ${sel.count} sản phẩm khỏi thư viện?`} confirmLabel="Xóa" danger requirePassword onConfirm={doBulkDelete} onCancel={() => setBulkDel(false)} />}
+    </div>
+  );
+}
+
+function ProductForm({ mode, row, industries, defaultIndustryId, onClose, onSaved }: { mode: 'create' | 'edit'; row?: ProductDto; industries: IndustryDto[]; defaultIndustryId: string; onClose: () => void; onSaved: () => void }): JSX.Element {
+  const toast = useToast();
+  const [industryId, setIndustryId] = useState(row ? String(row.industryId) : defaultIndustryId || (industries[0] ? String(industries[0].id) : ''));
+  const [name, setName] = useState(row?.name ?? '');
+  const [unit, setUnit] = useState(row?.unit ?? '');
+  const [price, setPrice] = useState(row ? String(row.price) : '');
+  const [priority, setPriority] = useState(row ? String(row.priority ?? 0) : '0');
+  const [status, setStatus] = useState(row?.status ?? 'ACTIVE');
+  const [saving, setSaving] = useState(false);
+
+  async function save(): Promise<void> {
+    if (!industryId) { toast.alert('Chọn nhóm ngành nghề.', 'Thiếu ngành'); return; }
+    if (!name.trim()) { toast.alert('Nhập tên sản phẩm.', 'Thiếu tên'); return; }
+    if (!unit.trim()) { toast.alert('Nhập đơn vị tính.', 'Thiếu ĐVT'); return; }
+    const p = Number(price.replace(/[^\d]/g, ''));
+    if (!Number.isFinite(p) || p <= 0) { toast.alert('Đơn giá phải là số nguyên dương.', 'Đơn giá sai'); return; }
+    setSaving(true);
+    try {
+      const prio = Math.min(1000, Number(priority.replace(/[^\d]/g, '')) || 0); // clamp 0–1000 khớp backend (validPriority)
+      const payload = { industryId: Number(industryId), name: name.trim(), unit: unit.trim(), price: p, priority: prio, status };
+      const res = mode === 'create'
+        ? await window.api.productCreate(payload)
+        : await window.api.productUpdate(row!.id, { ...payload, expectedUpdatedAt: row!.updatedAt });
+      if (res.ok) { toast.success(mode === 'create' ? 'Đã thêm sản phẩm.' : 'Đã cập nhật.'); onSaved(); }
+      else if (isStaleWrite(res)) { toast.alert(res.message ?? 'Bản ghi đã được người khác cập nhật, vui lòng mở lại.', STALE_TITLE); onSaved(); }
+      else toast.alert(res.message ?? 'Lưu thất bại.', 'Lỗi');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal title={mode === 'create' ? 'Thêm sản phẩm' : 'Sửa sản phẩm'} onClose={onClose}>
+      <div className="space-y-3">
+        <Field label="Nhóm ngành nghề" required>
+          <select className={inputCls} value={industryId} onChange={(e) => setIndustryId(e.target.value)}>
+            <option value="">— Chọn ngành —</option>
+            {industries.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Tên sản phẩm" required><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="Vé xe khách…" /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Đơn vị tính" required><input className={inputCls} value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="vé / kg / cái…" /></Field>
+          <Field label="Đơn giá (VND)" required><input className={inputCls + ' text-right tabular-nums'} inputMode="numeric" value={groupDigits(price)} onChange={(e) => setPrice(e.target.value.replace(/[^\d]/g, ''))} placeholder="0" /></Field>
+        </div>
+        <Field label="Ưu tiên khi sinh bill (0–1000, cao = SP hữu dụng, ưu tiên chọn)">
+          <input className={inputCls + ' text-right tabular-nums'} inputMode="numeric" value={priority} onChange={(e) => setPriority(e.target.value.replace(/[^\d]/g, ''))} placeholder="0" />
+        </Field>
+        <Field label="Trạng thái">
+          <select className={inputCls} value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="ACTIVE">Đang dùng</option>
+            <option value="INACTIVE">Ngừng dùng</option>
+          </select>
+        </Field>
+      </div>
+      <div className="mt-4 flex justify-end gap-2">
+        <Button variant="soft" onClick={onClose}>Hủy</Button>
+        <Button variant="confirm" onClick={save} disabled={saving} icon={saving ? <Loader2 className="h-4 w-4 animate-spin" /> : undefined}>{mode === 'create' ? 'Thêm' : 'Lưu'}</Button>
+      </div>
+    </Modal>
+  );
+}

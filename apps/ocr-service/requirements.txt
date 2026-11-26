@@ -1,0 +1,7 @@
+# Đã cài sẵn trên máy này (C:\Program Files\Python311) tại thời điểm viết — ghi lại để tái lập trên máy khác.
+fastapi==0.137.1
+uvicorn==0.46.0
+python-multipart
+paddleocr==3.7.0
+paddlepaddle
+Pillow

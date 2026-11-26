@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- viewport-fit=cover (27/7) — BẮT BUỘC để env(safe-area-inset-*) trả giá trị thật thay vì 0, xem
+         LoginScreen.tsx/TopBar.tsx (fix status bar đè nội dung, Android 15+/targetSdk 36 edge-to-edge). -->
+    <!-- user-scalable=no + maximum-scale=1 (5/8, Admin Demo "APK bị pinch-zoom cả giao diện") — KHÓA zoom giao diện
+         app (fix cứng size); ảnh trong lightbox có cơ chế zoom RIÊNG nên không ảnh hưởng. Giữ viewport-fit=cover. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>SigMa</title>
+    <!-- Logo/favicon SigMa (5/8, Admin Demo "web không có logo trên tab/link") — nguồn resources/icon.png
+         (logo 3D chính thức, cùng icon app Android). File nằm trong public/ nên Vite copy nguyên vào dist/. -->
+    <!-- ?v=046 cache-bust (6/8, Admin Demo "favicon web chat vẫn cũ") — favicon.ico đã là brand MỚI (129KB, sinh
+         bởi brand:sync 20:49) nhưng trình duyệt cache favicon rất lì → thêm query đổi mỗi bản để ép tải lại. -->
+    <link rel="icon" href="/favicon.ico?v=046" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=046" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png?v=046" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=046" />
+    <meta name="theme-color" content="#0579cc" />
+    <!-- Xem trước khi dán link (Zalo/Facebook/Messenger…) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="SigMa" />
+    <meta property="og:description" content="SigMa — nền tảng chat & vận hành đại lý." />
+    <meta property="og:image" content="/og-image.png" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="SigMa" />
+    <meta name="twitter:image" content="/og-image.png" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

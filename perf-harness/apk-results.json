@@ -1,0 +1,76 @@
+{
+  "apk_chatlist_ready": {
+    "ms": 6457,
+    "bodyLen": 271
+  },
+  "apk_nav_contacts": {
+    "ms": 797,
+    "urlOk": true,
+    "contentLen": 131,
+    "longtasks": 1,
+    "longtaskMaxMs": 51
+  },
+  "apk_nav_diary": {
+    "ms": 1756,
+    "urlOk": true,
+    "contentLen": 18,
+    "longtasks": 4,
+    "longtaskMaxMs": 216
+  },
+  "apk_nav_calendar": {
+    "ms": 1797,
+    "urlOk": true,
+    "contentLen": 108,
+    "longtasks": 4,
+    "longtaskMaxMs": 88
+  },
+  "apk_nav_settings": {
+    "ms": 5218,
+    "urlOk": true,
+    "contentLen": 1072,
+    "longtasks": 4,
+    "longtaskMaxMs": 107
+  },
+  "apk_nav_chat_back": {
+    "ms": 1113,
+    "urlOk": true,
+    "contentLen": 115,
+    "longtasks": 2,
+    "longtaskMaxMs": 87
+  },
+  "apk_openRoom_test400": {
+    "tToFirstMsgMs": 5682,
+    "longtasks": 12,
+    "longtaskMaxMs": 291,
+    "longtaskSumMs": 1533
+  },
+  "apk_scrollSel": {
+    "scSel": "[data-ps='1']",
+    "children": 50
+  },
+  "apk_afterLoadAll": {
+    "children": 400,
+    "scrollHeight": 50487,
+    "clientHeight": 643,
+    "totalDomNodes": 6098
+  },
+  "apk_scroll_full400": {
+    "frames": 17,
+    "totalMs": 3114,
+    "fps": 5.5,
+    "p95GapMs": 400,
+    "maxGapMs": 400,
+    "jankFrames": 16,
+    "longtasks": 14,
+    "longtaskMaxMs": 89,
+    "longtaskSumMs": 918
+  },
+  "apk_typing_full": {
+    "count": 40,
+    "medianMs": 77.4,
+    "p95Ms": 145.7,
+    "maxMs": 160.1,
+    "longtasks": 33,
+    "longtaskMaxMs": 123
+  }
+}

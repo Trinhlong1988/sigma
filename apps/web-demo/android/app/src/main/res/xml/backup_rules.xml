@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Vòng 2.5 hardening (3/8) — fullBackupContent cho Android 11 trở xuống (adb backup + Auto Backup cũ).
+     allowBackup đã = false ở AndroidManifest.xml (chặn triệt để), file này là lớp phòng-thủ-theo-chiều-sâu:
+     kể cả nếu ai bật lại backup, TỪ CHỐI toàn bộ để dữ liệu phiên (cookie httpOnly sigma_ws + localStorage
+     chứa sigma_device_token bỏ-qua-OTP) KHÔNG bao giờ rời máy. -->
+<full-backup-content>
+    <exclude domain="root" />
+    <exclude domain="file" />
+    <exclude domain="database" />
+    <exclude domain="sharedpref" />
+    <exclude domain="external" />
+</full-backup-content>

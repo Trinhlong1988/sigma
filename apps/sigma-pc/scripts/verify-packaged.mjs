@@ -1,0 +1,16 @@
+import { _electron as electron } from 'playwright';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+const here = path.dirname(fileURLToPath(import.meta.url));
+const exe = path.resolve(here, '..', 'dist', 'win-unpacked', 'SigMa.exe');
+const app = await electron.launch({ executablePath: exe, args: [] });
+const win = await app.firstWindow();
+await win.waitForLoadState('domcontentloaded');
+await win.waitForTimeout(4500);
+const title = await win.title();
+const url = win.url();
+const kids = await win.evaluate(() => document.getElementById('root')?.childElementCount ?? -1);
+const heading = await win.evaluate(() => document.body.innerText.split('\n')[0] || '');
+await win.screenshot({ path: path.resolve(here, '..', '_evidence', 'sigma-pc-packaged.png') });
+console.log('PACKAGED title:', title, '| url:', url, '| root kids:', kids, '| heading:', heading);
+await app.close();

@@ -1,0 +1,257 @@
+import { useEffect, useState } from 'react';
+import { DatabaseBackup, Loader2, RotateCcw, HardDriveDownload, RefreshCw, Copy, CheckCircle2, AlertTriangle } from 'lucide-react';
+import type { AuthUser } from '@sigma/shared';
+import { hasPermission, fmtDateTime } from '@sigma/shared';
+import type { BackupDto, BackupMirrorConfig } from '../../../preload/index.d';
+import { useToast } from '../lib/toast.js';
+import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import { StatBar } from '../components/StatBar.js';
+import { Field, inputCls } from '../components/Field.js';
+import { Button } from '../components/Button.js';
+// MẪU CHỐT 6/11 — kiểu bảng lấy TỪ MODULE DÙNG CHUNG, cấm chép chuỗi class vào trang.
+import { thChuan, tdChuan, trChuan, KhungBang } from '../components/BangChuan.js';
+
+/** SỐ CỘT bảng sao lưu — dùng chung cho hàng rỗng / hàng đệm (§1). */
+const SO_COT = 5;
+
+/** Dung lượng gọn: <1MB → KB, còn lại → MB (số thập phân dùng dấu phẩy — chuẩn VN). */
+function fmtSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return (Math.round((bytes / 1024 / 1024) * 10) / 10).toString().replace('.', ',') + ' MB';
+  return (Math.round((bytes / 1024) * 10) / 10).toString().replace('.', ',') + ' KB';
+}
+
+export function BackupPage({ user }: { user: AuthUser }): JSX.Element {
+  const toast = useToast();
+  const [rows, setRows] = useState<BackupDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [restoreTarget, setRestoreTarget] = useState<BackupDto | null>(null);
+  // A1 (16/7): sao lưu chỉ chạy trên MÁY CHỦ. Mặc định true để máy chủ không nhấp nháy khóa; máy trạm → false.
+  const [serverRole, setServerRole] = useState(true);
+
+  const canCreate = hasPermission(user, 'BACKUP_CREATE');
+  const canRestore = hasPermission(user, 'BACKUP_RESTORE');
+
+  useEffect(() => {
+    window.api.serverConfigGet().then((st) => setServerRole(st.serverRole)).catch(() => { /* không lấy được → giữ mặc định */ });
+  }, []);
+
+  async function reload(): Promise<void> {
+    setLoading(true);
+    const res = await window.api.backupList();
+    if (res.ok && res.data) setRows(res.data);
+    else if (res.message) toast.alert(res.message);
+    setLoading(false);
+  }
+  useEffect(() => {
+    void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function createBackup(): Promise<void> {
+    setCreating(true);
+    const res = await window.api.backupCreate('Manual backup');
+    setCreating(false);
+    if (res.ok) toast.success('Đã tạo backup thành công');
+    else toast.alert(res.message ?? 'Tạo backup thất bại');
+    await reload();
+  }
+
+  async function doRestore(b: BackupDto, password?: string): Promise<void> {
+    const res = await window.api.backupRestore(b.filePath, password ?? '');
+    if (res.ok) toast.success(res.message ?? 'Đã khôi phục');
+    else toast.alert(res.message ?? 'Khôi phục thất bại');
+    setRestoreTarget(null);
+    await reload();
+  }
+
+  return (
+    <div data-nut-vuong data-trang-full className="flex h-full min-h-0 w-full flex-col">
+      <div className="mb-4 flex shrink-0 items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-800">Sao lưu & Phục hồi</h2>
+          <p className="text-sm text-slate-500">Sao lưu & phục hồi cơ sở dữ liệu tại máy. Phục hồi yêu cầu mật khẩu quản trị.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button data-nut="lammoi" variant="soft" title="Tải lại dữ liệu mới nhất" icon={<RefreshCw className="h-4 w-4" />} onClick={reload}>Làm mới</Button>
+          {canCreate && serverRole && (
+            <Button data-nut="them" variant="confirm" onClick={createBackup} disabled={creating} icon={creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <HardDriveDownload className="h-4 w-4" />}>Tạo bản sao lưu ngay</Button>
+          )}
+          {canCreate && !serverRole && (
+            <span
+              title="Sao lưu chỉ thực hiện trên máy chủ (nơi cài PostgreSQL). Máy trạm không chạy được pg_dump."
+              className="flex items-center gap-2 rounded-lg border border-line px-4 py-2 text-sm font-medium text-slate-400"
+            >
+              <HardDriveDownload className="h-4 w-4" /> Sao lưu chạy ở máy chủ
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Bộ đếm — đếm CLIENT từ backupList (trả full, không phân trang). */}
+      <StatBar
+        items={[
+          { label: 'Tổng bản sao lưu', value: rows.length, tone: 'bg-brand-tint text-brand' },
+          { label: 'Còn file', value: rows.filter((b) => b.exists).length, tone: 'bg-success/10 text-success' },
+          { label: 'Mất file', value: rows.filter((b) => !b.exists).length, tone: 'bg-danger/10 text-danger' },
+          { label: 'Tổng dung lượng', value: fmtSize(rows.reduce((s, b) => s + (b.fileSize ?? 0), 0)) }
+        ]}
+      />
+
+      <MirrorPanel canEdit={canRestore} />
+
+      {/* MẪU CHỐT 6/11 — KhungBang dùng chung; tiêu đề ghim trên. Cột "Kích thước" là cột SỐ ⇒ căn phải
+          + tabular-nums, cùng cỡ chữ 12px như mọi cột (§2). Không có cột TIỀN ⇒ không có hàng TỔNG. */}
+      <KhungBang>
+        <table className="h-full w-full min-w-[880px] text-xs">
+          <thead className="sticky top-0 z-20 bg-slate-200">
+            <tr>
+              <th className={thChuan + ' w-[320px]'}>Tên file</th>
+              <th className={thChuan + ' w-[160px]'}>Thời gian</th>
+              <th className={thChuan + ' w-[120px]'}>Kích thước</th>
+              <th className={thChuan + ' w-[180px]'}>Checksum</th>
+              <th className={thChuan + ' w-[120px]'}>Thao tác</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && (
+              <tr>
+                <td colSpan={SO_COT} className="px-4 py-8 text-center text-slate-400">
+                  <Loader2 className="mx-auto h-5 w-5 animate-spin" />
+                </td>
+              </tr>
+            )}
+            {!loading && rows.length === 0 && (
+              <tr>
+                <td colSpan={SO_COT} className="px-4 py-10 text-center text-slate-400">
+                  <DatabaseBackup className="mx-auto mb-2 h-6 w-6" /> Chưa có bản sao lưu nào.
+                </td>
+              </tr>
+            )}
+            {!loading &&
+              rows.map((b, i) => (
+                <tr key={b.id} className={trChuan(i)}>
+                  <td className={tdChuan + ' font-mono text-slate-600'}>
+                    {b.fileName}
+                    {!b.exists && <span className="ml-2 text-danger">(mất file)</span>}
+                  </td>
+                  <td className={tdChuan + ' text-center text-slate-500'}>{fmtDateTime(b.createdAt)}</td>
+                  <td className={tdChuan + ' text-right tabular-nums text-slate-800'}>{b.fileSize ? fmtSize(b.fileSize) : '—'}</td>
+                  <td className={tdChuan + ' font-mono text-slate-400'}>{b.checksum?.slice(0, 16) ?? '—'}…</td>
+                  <td className={tdChuan + ' text-center'}>
+                    {canRestore && b.exists && (
+                      <Button variant="soft" size="xs" icon={<RotateCcw className="h-3.5 w-3.5" />} onClick={() => setRestoreTarget(b)}>Khôi phục</Button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            {/* HÀNG ĐỆM (§1). */}
+            <tr aria-hidden className="h-full"><td colSpan={SO_COT} className="h-9" /></tr>
+          </tbody>
+        </table>
+      </KhungBang>
+
+      {restoreTarget && (
+        <ConfirmDialog
+          title="Khôi phục từ backup"
+          message={`Khôi phục dữ liệu từ "${restoreTarget.fileName}". Hệ thống sẽ tự sao lưu hiện trạng trước khi khôi phục. Nhập lại mật khẩu Admin để xác nhận.`}
+          confirmLabel="Khôi phục"
+          danger
+          requirePassword
+          onCancel={() => setRestoreTarget(null)}
+          onConfirm={(pwd) => doRestore(restoreTarget, pwd)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** R48 Pha 5 — Sao lưu TẦNG 2: nhân bản mỗi bản sao lưu ra thư mục khác (ổ ngoài/NAS) + giữ N bản. */
+function MirrorPanel({ canEdit }: { canEdit: boolean }): JSX.Element {
+  const toast = useToast();
+  const [cfg, setCfg] = useState<BackupMirrorConfig | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [dir, setDir] = useState('');
+  const [keep, setKeep] = useState('30');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function load(): Promise<void> {
+    const res = await window.api.backupMirrorConfigGet();
+    if (res.ok && res.data) {
+      setCfg(res.data);
+      setDir(res.data.mirrorDir ?? '');
+      setKeep(String(res.data.keep));
+    }
+  }
+  useEffect(() => { void load(); }, []);
+
+  async function save(): Promise<void> {
+    if (!password) return toast.alert('Nhập mật khẩu để xác nhận đổi cấu hình sao lưu.', 'Cần mật khẩu');
+    setBusy(true);
+    const res = await window.api.backupMirrorConfigSet({ mirrorDir: dir.trim() || null, keep: Number(keep) || 30 }, password);
+    setBusy(false);
+    if (res.ok) { toast.success(dir.trim() ? 'Đã bật/cập nhật sao lưu tầng 2' : 'Đã tắt sao lưu tầng 2'); setEditing(false); setPassword(''); await load(); }
+    else toast.alert(res.message ?? 'Lưu cấu hình thất bại', 'Không lưu được');
+  }
+
+  const on = !!cfg?.mirrorDir;
+  return (
+    <div className="mb-4 rounded-xl border border-line bg-white p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-2">
+          <Copy className="h-4 w-4 text-brand" />
+          <div>
+            <div className="text-sm font-semibold text-slate-700">Sao lưu tầng 2 (nhân bản ra nơi khác)</div>
+            <div className="text-xs text-slate-500">Mỗi bản sao lưu tự copy sang ổ/thư mục khác để hỏng ổ không mất cả gốc lẫn backup.</div>
+          </div>
+        </div>
+        {canEdit && !editing && (
+          <Button variant="soft" size="xs" onClick={() => setEditing(true)}>{on ? 'Đổi cấu hình' : 'Bật ngay'}</Button>
+        )}
+      </div>
+
+      {!editing && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
+          {on ? (
+            <>
+              <span className="inline-flex items-center gap-1.5 text-emerald-600"><CheckCircle2 className="h-4 w-4" /> Đang bật</span>
+              <span className="text-slate-600">Thư mục: <span className="font-mono text-xs">{cfg!.mirrorDir}</span></span>
+              <span className="text-slate-500">Giữ {cfg!.keep} bản</span>
+              {cfg!.lastMirrorAt && (
+                <span className={cfg!.lastMirrorOk === false ? 'text-danger' : 'text-slate-500'}>
+                  Nhân bản gần nhất: {fmtDateTime(cfg!.lastMirrorAt)} {cfg!.lastMirrorOk === false ? '· THẤT BẠI' : '· OK'}
+                </span>
+              )}
+              {cfg!.lastMirrorOk === false && cfg!.lastMirrorError && (
+                <span className="inline-flex items-center gap-1 text-danger"><AlertTriangle className="h-4 w-4" /> {cfg!.lastMirrorError}</span>
+              )}
+            </>
+          ) : (
+            <span className="text-slate-400">Chưa bật — bản sao lưu chỉ nằm trên máy này.</span>
+          )}
+        </div>
+      )}
+
+      {editing && (
+        <div className="mt-3 grid grid-cols-2 gap-4">
+          <div className="col-span-2">
+            <Field label="Thư mục nhân bản" hint="Đường dẫn ổ ngoài / NAS, ví dụ E:\\alpha-backup hoặc \\\\NAS\\backup. Bỏ trống = tắt.">
+              <input className={inputCls + ' font-mono text-xs'} value={dir} onChange={(e) => setDir(e.target.value)} placeholder="E:\\alpha-backup" autoFocus />
+            </Field>
+          </div>
+          <Field label="Giữ số bản mới nhất" hint="1–999; vượt sẽ tự xóa bản cũ">
+            <input className={inputCls + ' text-right tabular-nums'} inputMode="numeric" value={keep} onChange={(e) => setKeep(e.target.value.replace(/[^\d]/g, ''))} />
+          </Field>
+          <Field label="Mật khẩu xác nhận" required>
+            <input type="password" className={inputCls} value={password} onChange={(e) => setPassword(e.target.value)} />
+          </Field>
+          <div className="col-span-2 flex justify-end gap-2">
+            <Button variant="soft" onClick={() => { setEditing(false); setPassword(''); setDir(cfg?.mirrorDir ?? ''); setKeep(String(cfg?.keep ?? 30)); }}>Hủy</Button>
+            <Button variant="confirm" onClick={save} disabled={busy} icon={busy ? <Loader2 className="h-4 w-4 animate-spin" /> : undefined}>Lưu cấu hình</Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

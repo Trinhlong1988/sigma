@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Vòng 2.5 hardening (3/8) — dataExtractionRules cho Android 12+ (targetSdk 36). Chi phối CẢ cloud-backup
+     LẪN device-transfer (D2D). allowBackup="false" đã tắt cloud backup; khối này TỪ CHỐI thêm mọi kênh còn
+     lại để dữ liệu phiên (cookie httpOnly xác thực + sigma_device_token bỏ-qua-OTP trong WebView localStorage)
+     KHÔNG rời thiết bị qua bất kỳ đường nào. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>

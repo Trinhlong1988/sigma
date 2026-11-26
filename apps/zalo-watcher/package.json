@@ -1,0 +1,21 @@
+{
+  "name": "@sigma/zalo-watcher",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Watcher tự nhặt ảnh bill mới trong nhóm Zalo (ZaloData media) → decode JXL → POST /internal/zalo-bill-ingest của bot-api. Chạy 24/24, giờ làm 07:00-00:00.",
+  "bin": {
+    "zalo-watcher": "src/index.mjs"
+  },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "list-groups": "node src/index.mjs list-groups",
+    "once": "node src/index.mjs once",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@jsquash/jxl": "^1.3.0",
+    "chokidar": "^3.6.0",
+    "sharp": "^0.33.0"
+  }
+}

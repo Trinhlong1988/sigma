@@ -1,0 +1,22 @@
+{
+ "bill": {
+  "hash": "3478c6136c34",
+  "tag": "#p7"
+ },
+ "bankHistory": {
+  "hash": "02883586a686",
+  "tag": "#dh"
+ },
+ "transfer": {
+  "hash": "08df66c29058",
+  "tag": "#p6"
+ },
+ "cardNotice": {
+  "hash": "15a10f313593",
+  "tag": "#note1"
+ },
+ "qr": {
+  "hash": "e48aaab62c65",
+  "tag": "#qr3"
+ }
+}

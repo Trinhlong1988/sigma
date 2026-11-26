@@ -1,0 +1,110 @@
+import { describe, it, expect } from 'vitest';
+import {
+  canCreateUserWithRoles,
+  canRemoveOrLockAdmin,
+  isSelfPrivilegeEscalation,
+  escalatedPermissions,
+  grantsExceedActor,
+  targetPrivilegeExceedsActor
+} from './user.rules.js';
+import type { AuthUser } from '@sigma/shared';
+import { DEFAULT_ROLE_PERMISSIONS } from '@sigma/shared';
+
+function user(roles: string[]): AuthUser {
+  const perms = [...new Set(roles.flatMap((r) => DEFAULT_ROLE_PERMISSIONS[r] ?? []))];
+  return {
+    id: roles.includes('ADMIN') ? 1 : 2,
+    username: 'u',
+    fullName: 'U',
+    status: 'ACTIVE',
+    forceChangePassword: false,
+    roles,
+    permissions: perms
+  };
+}
+
+describe('manager / user creation scope (IMS_SPEC §12)', () => {
+  it('Admin can create any user', () => {
+    expect(canCreateUserWithRoles(user(['ADMIN']), ['SALES'])).toBe(true);
+    expect(canCreateUserWithRoles(user(['ADMIN']), ['MANAGER'])).toBe(true);
+  });
+
+  it('Manager (limited) can create a normal-role user', () => {
+    expect(canCreateUserWithRoles(user(['MANAGER']), ['SALES'])).toBe(true);
+  });
+
+  it('Manager cannot create Admin (R_MANAGER_002)', () => {
+    expect(canCreateUserWithRoles(user(['MANAGER']), ['ADMIN'])).toBe(false);
+  });
+
+  it('Manager cannot create another Manager (R_MANAGER_003)', () => {
+    expect(canCreateUserWithRoles(user(['MANAGER']), ['MANAGER'])).toBe(false);
+  });
+
+  it('Support / Sales / Customer cannot create users by default', () => {
+    expect(canCreateUserWithRoles(user(['SUPPORT']), ['SALES'])).toBe(false);
+    expect(canCreateUserWithRoles(user(['SALES']), ['SALES'])).toBe(false);
+    expect(canCreateUserWithRoles(user(['CUSTOMER']), ['SALES'])).toBe(false);
+  });
+});
+
+describe('last-admin protection (R004/R005)', () => {
+  it('blocks removing/locking the last active Admin', () => {
+    expect(canRemoveOrLockAdmin(true, 1)).toBe(false);
+  });
+  it('allows removing an Admin when others remain', () => {
+    expect(canRemoveOrLockAdmin(true, 2)).toBe(true);
+  });
+  it('always allows for non-admin targets', () => {
+    expect(canRemoveOrLockAdmin(false, 1)).toBe(true);
+  });
+});
+
+describe('grant escalation (R_MANAGER_004)', () => {
+  it('Admin can grant anything (holds all permissions)', () => {
+    expect(grantsExceedActor(user(['ADMIN']), ['ROLE_DELETE', 'USER_DELETE'])).toBe(false);
+  });
+  it('Manager cannot grant a permission they do not hold', () => {
+    const mgr = user(['MANAGER']); // no USER_DELETE / ROLE_DELETE by default
+    expect(escalatedPermissions(mgr, ['USER_READ'])).toEqual([]);
+    expect(grantsExceedActor(mgr, ['USER_DELETE'])).toBe(true);
+    expect(escalatedPermissions(mgr, ['USER_DELETE', 'ROLE_DELETE']).sort()).toEqual([
+      'ROLE_DELETE',
+      'USER_DELETE'
+    ]);
+  });
+});
+
+describe('target privilege containment — act ON another account (reset password)', () => {
+  it('Admin actor có thể tác động bất kỳ ai (kể cả Admin khác)', () => {
+    expect(targetPrivilegeExceedsActor(user(['ADMIN']), user(['ADMIN']))).toBe(false);
+    expect(targetPrivilegeExceedsActor(user(['ADMIN']), user(['MANAGER']))).toBe(false);
+  });
+  it('Manager KHÔNG được tác động Admin (target out-rank) — chống leo-thang', () => {
+    expect(targetPrivilegeExceedsActor(user(['MANAGER']), user(['ADMIN']))).toBe(true);
+  });
+  it('Manager ↔ Manager (cùng quyền) → cho phép', () => {
+    expect(targetPrivilegeExceedsActor(user(['MANAGER']), user(['MANAGER']))).toBe(false);
+  });
+  it('Manager → cấp thấp (quyền là tập con) → cho phép', () => {
+    expect(targetPrivilegeExceedsActor(user(['MANAGER']), user(['SALES']))).toBe(false);
+    expect(targetPrivilegeExceedsActor(user(['MANAGER']), user(['SUPPORT']))).toBe(false);
+  });
+  it('target giữ 1 quyền actor KHÔNG có → out-rank (dù không phải role Admin)', () => {
+    const mgr = user(['MANAGER']);
+    const richer = { ...user(['MANAGER']), permissions: [...mgr.permissions, 'ROLE_DELETE'] };
+    expect(targetPrivilegeExceedsActor(mgr, richer)).toBe(true);
+  });
+});
+
+describe('self privilege escalation (R006)', () => {
+  it('flags a user editing their own roles', () => {
+    expect(isSelfPrivilegeEscalation(5, 5, true)).toBe(true);
+  });
+  it('does not flag editing own non-role fields', () => {
+    expect(isSelfPrivilegeEscalation(5, 5, false)).toBe(false);
+  });
+  it('does not flag editing another user roles', () => {
+    expect(isSelfPrivilegeEscalation(5, 6, true)).toBe(false);
+  });
+});

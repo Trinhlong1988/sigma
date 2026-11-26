@@ -1,0 +1,635 @@
+@import 'tailwindcss';
+
+/* Be Vietnam Pro — offline via @fontsource (no Google CDN), giống GLB/SigMa desktop. */
+@import '@fontsource/be-vietnam-pro/400.css';
+@import '@fontsource/be-vietnam-pro/500.css';
+@import '@fontsource/be-vietnam-pro/600.css';
+@import '@fontsource/be-vietnam-pro/700.css';
+
+/* === DESIGN-SYSTEM BRAND MỚI (glass) — NGUỒN DUY NHẤT của bảng màu brand + class glass (.btn-primary /
+ * .btn-teal / .btn-soft / .card-glass). Sinh tự động từ tile icon (assets/brand/brand.tokens.json →
+ * `npm run brand:sync`). @theme trong file này (palette #1877d6 / teal #3bc3d0 / radius-button 16px…) THẮNG
+ * vì các token brand CŨ (#0579cc…) đã bị XÓA khỏi @theme bên dưới → chỉ còn 1 nơi định nghĩa, hết lệch. */
+@import './brand.css';
+
+/* Bảng màu copy nguyên từ quan-ly-glb/apps/desktop/src/renderer/src/styles.css (nguồn token màu,
+ * xem plan mục C) + bổ sung MỚI cho web-demo: biến dark mode (data-theme="dark") + token phong cách
+ * macOS (bóng mềm nhiều lớp, bo góc lớn, blur kính mờ). Không đụng file gốc GLB. */
+@theme {
+  --font-sans: 'Be Vietnam Pro', ui-sans-serif, system-ui, sans-serif;
+
+  /* NOTE (5/8 — áp brand mới glass): các token brand (--color-brand / -hover / -tint / -teal / -teal-hover /
+   * -dark-tint) ĐÃ CHUYỂN sang NGUỒN DUY NHẤT `./brand.css` (@theme, palette #1877d6 / teal #3bc3d0). CẤM khai
+   * lại ở đây — 2 nơi trùng gây lệch màu. Mọi `bg-brand`/`text-brand`/`.btn-*` tự lấy màu mới qua Tailwind @theme. */
+  --color-sidebar: #eceef3;
+  --color-sidebar-text: #4b5563;
+  --color-appbg: #f4f6fa;
+  --color-line: #e5e9f0;
+  --color-success: #16a34a;
+  --color-danger: #dc2626;
+  --color-warning: #f59e0b;
+
+  /* MỚI (web-demo) — dark mode, kích hoạt qua [data-theme="dark"] trên <html>. Chọn tối vừa đủ tương
+   * phản để đọc chữ/đường viền rõ, không đen tuyền (macOS "sáng/tối" phong cách hiện đại). */
+  --color-appbg-dark: #14161c;
+  --color-sidebar-dark: #1b1e27;
+  --color-line-dark: #2c303b;
+  /* --color-brand-dark-tint đã chuyển sang ./brand.css (nguồn duy nhất). */
+
+  /* MỚI (web-demo) — token phong cách macOS: bóng mềm nhiều lớp, bo góc lớn, kính mờ. */
+  --shadow-soft: 0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 12px rgba(15, 23, 42, 0.06);
+  --shadow-card: 0 2px 6px rgba(15, 23, 42, 0.08), 0 12px 32px rgba(15, 23, 42, 0.12);
+  --radius-lg: 16px;
+  --blur-glass: 20px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* SigMa PC (Electron, frame:false) — main.tsx thêm class `pc-shell` khi chạy trong vỏ PC. Thanh tiêu đề nút
+ * Mac (PcTitleBar) cao 32px, position:fixed top → đẩy nội dung xuống + trừ 32px khỏi các chiều cao 100vh để
+ * KHÔNG tràn (AppShell dùng h-screen). CHỈ áp khi có class này (web/APK KHÔNG có → 0 ảnh hưởng). */
+html.pc-shell body {
+  padding-top: 32px;
+}
+html.pc-shell .h-screen {
+  height: calc(100vh - 32px);
+}
+html.pc-shell .min-h-screen {
+  min-height: calc(100vh - 32px);
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--color-appbg);
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Port nguyên xi từ quan-ly-glb/apps/desktop/src/renderer/src/styles.css (Admin Demo 15/7 — "hiệu ứng 3D
+ * nổi khi chuyển menu": content ngả nhẹ trong không gian (perspective + rotateX) rồi dựng thẳng + nổi
+ * lên, mờ dần — LƯU Ý: dùng rotateX (ngả/nổi lên), KHÔNG PHẢI rotateY kiểu lật trang sách thật; đây là
+ * hiệu ứng "lật trang" DUY NHẤT có trong GLB gốc, không có cơ chế nào khác). Áp cho web-demo khi
+ * chuyển route chính trong AppShell.tsx (key={pathname} trên khối bọc <Outlet>). */
+@keyframes pageIn {
+  0%   { opacity: 0; transform: perspective(1200px) translateY(26px) rotateX(7deg) scale(0.965); }
+  60%  { opacity: 1; }
+  100% { opacity: 1; transform: perspective(1200px) translateY(0) rotateX(0) scale(1); }
+}
+.page-enter { animation: pageIn 0.42s cubic-bezier(0.22, 0.61, 0.36, 1); transform-origin: top center; will-change: transform, opacity; }
+
+/* LoginScreen.tsx (2/8, Admin Demo "thiết kế hiệu ứng cho đẹp, đồng bộ logo kiểu mới") — thẻ đăng nhập nổi nhẹ
+ * lên + mờ dần vào lúc mở màn (khác pageIn ở trên — origin "center" chứ không phải "top", hợp cho 1 thẻ căn
+ * giữa màn thay vì cả trang trượt từ trên); quầng sáng sau logo nhấp nháy nhẹ liên tục, CÙNG tinh thần halo
+ * splash animation đã duyệt (B117/B118 — glow xanh dương→xanh ngọc). Tôn trọng prefers-reduced-motion — tắt
+ * hẳn animation cho người dùng đã bật cờ này ở hệ điều hành. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes loginCardIn {
+    0% { opacity: 0; transform: translateY(10px) scale(0.97); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes loginHaloPulse {
+    0%, 100% { opacity: 0.2; transform: scale(1); }
+    50% { opacity: 0.32; transform: scale(1.08); }
+  }
+  .login-card-enter { animation: loginCardIn 0.38s cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+  .login-logo-halo { animation: loginHaloPulse 3.2s ease-in-out infinite; }
+}
+
+/* DotsLoader.tsx (1/8, Admin Demo duyệt demo "3 chấm nhún dùng brand") — thay Loader2 xoay tròn toàn app. */
+@keyframes dotsBounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
+}
+.animate-dots-bounce { animation: dotsBounce 1.1s ease-in-out infinite; }
+
+/* AppSplash.tsx (2/8, Admin Demo duyệt demo "Ánh sáng quét" — đổi nền trắng thay demo mẫu nền tối navy). Dải
+   sáng trượt 1 LẦN (không lặp) từ ngoài-trái sang ngoài-phải qua logo lúc app boot. */
+@keyframes splashSweep {
+  0%   { transform: translateX(-140%) skewX(-12deg); }
+  100% { transform: translateX(240%) skewX(-12deg); }
+}
+.animate-splash-sweep { animation: splashSweep 1s cubic-bezier(0.4, 0, 0.2, 1) both; }
+
+/* Highlight tin nhắn kết quả TÌM KIẾM kiểu Zalo (6/8, Admin Demo "tin kết quả phải NỔI LÊN phân biệt") — thay ring
+   vàng tĩnh cũ: bong bóng NẢY nhẹ + vầng sáng brand loé rồi tắt dần (~1.8s), dễ nhận. Dùng transform+box-shadow
+   (GPU, mượt cả WebView APK). transform-origin center để nảy tại chỗ, không xô layout. */
+@keyframes msgJumpHighlight {
+  0%   { transform: scale(1);     box-shadow: 0 0 0 0 rgba(24,119,214,0); }
+  12%  { transform: scale(1.04);  box-shadow: 0 0 0 4px rgba(24,119,214,0.45), 0 8px 22px rgba(15,159,224,0.4); }
+  30%  { transform: scale(1); }
+  70%  { box-shadow: 0 0 0 3px rgba(24,119,214,0.28), 0 6px 16px rgba(15,159,224,0.25); }
+  100% { transform: scale(1);     box-shadow: 0 0 0 0 rgba(24,119,214,0); }
+}
+.msg-jump-highlight { animation: msgJumpHighlight 1.8s cubic-bezier(0.22, 0.61, 0.36, 1); transform-origin: center; will-change: transform, box-shadow; position: relative; z-index: 5; border-radius: inherit; }
+/* #26 (8/8) — nhảy tới ĐÚNG bài Nhật ký từ thông báo: dùng CHUNG keyframe msgJumpHighlight (nảy nhẹ + vầng sáng
+   brand) như nhảy-tới-tin-nhắn, cho nhất quán hiệu ứng toàn app. Bài lớn nên scale 1.04 vẫn nảy tại chỗ. */
+.diary-post-jump-highlight { animation: msgJumpHighlight 1.8s cubic-bezier(0.22, 0.61, 0.36, 1); transform-origin: center; will-change: transform, box-shadow; position: relative; z-index: 5; }
+
+/* Toast tin nhắn kiểu Zalo (item 3, 6/8) — animation vào mượt, chỉ transform+opacity (GPU). TÊN RIÊNG
+   (chatToast*) KHÔNG đụng msgJumpHighlight/.msg-jump-highlight ở trên. 2 hướng: corner (trượt từ phải vào,
+   góc phải-dưới) và top (thả từ trên xuống, kiểu điện thoại). */
+@keyframes chatToastInCorner {
+  0%   { transform: translateX(24px) scale(0.96); opacity: 0; }
+  100% { transform: translateX(0) scale(1);       opacity: 1; }
+}
+@keyframes chatToastInTop {
+  0%   { transform: translateY(-24px) scale(0.96); opacity: 0; }
+  100% { transform: translateY(0) scale(1);        opacity: 1; }
+}
+.chat-toast-enter-corner { animation: chatToastInCorner 0.26s cubic-bezier(0.22, 0.61, 0.36, 1) both; will-change: transform, opacity; }
+.chat-toast-enter-top    { animation: chatToastInTop 0.26s cubic-bezier(0.22, 0.61, 0.36, 1) both; will-change: transform, opacity; }
+
+/* Chấm PRESENCE online/offline "nhịp tim" (item 13, 6/8, Admin Demo "đỏ xanh nháy nhẹ nhàng mượt mà như nhịp tim").
+   CHỈ dùng cho chấm trạng thái đang-hoạt-động/ngoại-tuyến (component OnlineDot) — KHÔNG áp cho chấm phân loại/
+   badge số/chấm nhóm. 2 nhịp scale (thump-thump) + quầng halo lan theo màu chấm (biến --online-dot-halo do
+   OnlineDot đặt theo xanh/đỏ). Chu kỳ 1.6s, biên độ nhỏ (tối đa scale 1.18) → nhẹ nhàng, KHÔNG chớp gắt.
+   transform-origin center để scale nở đều quanh tâm chấm. */
+@keyframes onlinePulse {
+  0%   { transform: scale(1);    box-shadow: 0 0 0 0 var(--online-dot-halo, rgba(22,163,74,0.55)); }
+  14%  { transform: scale(1.18); box-shadow: 0 0 0 3px var(--online-dot-halo-0, rgba(22,163,74,0)); }
+  28%  { transform: scale(1); }
+  42%  { transform: scale(1.1);  box-shadow: 0 0 0 5px var(--online-dot-halo-0, rgba(22,163,74,0)); }
+  56%  { transform: scale(1); }
+  100% { transform: scale(1);    box-shadow: 0 0 0 0 var(--online-dot-halo-0, rgba(22,163,74,0)); }
+}
+.online-dot {
+  border-radius: 9999px;
+  transform-origin: center;
+  animation: onlinePulse 1.6s ease-in-out infinite;
+  will-change: transform, box-shadow;
+}
+/* Tôn trọng prefers-reduced-motion — tắt hẳn nhịp tim (giữ chấm tĩnh, vẫn đúng màu trạng thái). */
+@media (prefers-reduced-motion: reduce) {
+  .online-dot { animation: none; }
+}
+
+/* Dark mode — toggle qua ThemeToggle.tsx đặt data-theme="dark" trên <html>. */
+:root[data-theme='dark'] body {
+  background: var(--color-appbg-dark);
+  color: #e2e8f0;
+}
+:root[data-theme='dark'] .bg-appbg {
+  background-color: var(--color-appbg-dark) !important;
+}
+:root[data-theme='dark'] .bg-sidebar {
+  background-color: var(--color-sidebar-dark) !important;
+}
+:root[data-theme='dark'] .border-line {
+  border-color: var(--color-line-dark) !important;
+}
+:root[data-theme='dark'] .bg-white {
+  background-color: #20242e !important;
+  color: #e2e8f0;
+}
+:root[data-theme='dark'] .text-slate-800,
+:root[data-theme='dark'] .text-slate-700,
+:root[data-theme='dark'] .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+:root[data-theme='dark'] .bg-brand-tint {
+  background-color: var(--color-brand-dark-tint) !important;
+}
+/* Polish CMD_AUDIT 23/7: mục sidebar CHƯA chọn bị chìm trên nền sidebar-dark (#4b5563 quá tối) —
+ * nâng sáng chữ/icon sidebar + hover dùng lớp trắng mờ nhẹ thay vì trắng đặc. */
+:root[data-theme='dark'] .text-sidebar-text {
+  color: #aab4c6;
+}
+:root[data-theme='dark'] .bg-sidebar .hover\:bg-white\/70:hover {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+}
+/* TopBar dùng bg-appbg/90 (variant opacity) — selector .bg-appbg ở trên KHÔNG khớp nên dark mode bị
+ * nền sáng + chữ sáng (tiêu đề chìm). Override riêng cho variant này. */
+:root[data-theme='dark'] .bg-appbg\/90 {
+  background-color: rgba(20, 22, 28, 0.9) !important;
+}
+
+/* Thanh cuộn mảnh, bo tròn — giống GLB. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #c3ccda transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #c3ccda;
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #97a4ba;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.bg-sidebar {
+  scrollbar-color: rgba(71, 85, 105, 0.28) transparent;
+}
+.bg-sidebar ::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.28);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+.bg-sidebar ::-webkit-scrollbar-thumb:hover {
+  background: rgba(71, 85, 105, 0.45);
+}
+
+/* macOS-style helpers dùng chung cho card/panel/modal trong web-demo. */
+.glass-panel {
+  backdrop-filter: blur(var(--blur-glass));
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+  background-color: rgba(255, 255, 255, 0.72);
+}
+:root[data-theme='dark'] .glass-panel {
+  background-color: rgba(27, 30, 39, 0.72);
+}
+
+.shadow-soft {
+  box-shadow: var(--shadow-soft);
+}
+.shadow-card {
+  box-shadow: var(--shadow-card);
+}
+.rounded-lg-mac {
+  border-radius: var(--radius-lg);
+}
+
+/* Bong bóng chat "của mình" (1/8, Admin Demo "nền màu xanh của khung tin nhắn này đậm quá, nhạt hơn 30%, nổi
+   khung 3d nhẹ") — TRƯỚC ĐÂY dùng thẳng `bg-brand` (màu ĐẶC #1657d0, phẳng, không có chiều sâu) cho MỌI bong
+   bóng tin nhắn của chính mình (ChatBubble.tsx). Đổi sang gradient nhạt hơn ~30% (`color-mix` trộn dần về
+   trắng, giữ ĐÚNG sắc brand — không bịa màu mới) + inset sáng viền trên/tối nhẹ viền dưới (gợi khối nổi 3D
+   kiểu `.toggle-3d` đã dùng trong file này) + shadow màu brand mờ nhạt bên ngoài (thay `shadow-soft` xám trung
+   tính mặc định — CÙNG hướng nổi khối nhưng đúng tông màu bong bóng thay vì đổ bóng đen chung chung). */
+/* 7/8 (Admin Demo) — bong bóng tin CỦA MÌNH: nền XANH NHẸ (brand SigMa, kiểu Zalo) + chữ ĐEN dễ đọc (đổi text-white
+   → text-slate-800 ở ChatBubble). Trước đây gradient brand ĐẬM + chữ trắng (khó đọc). Giữ hue brand SigMa. */
+.chat-bubble-mine {
+  background: color-mix(in srgb, var(--color-brand) 13%, white 87%);
+  border: 1px solid color-mix(in srgb, var(--color-brand) 24%, white 76%);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+/* Polish đồng bộ toàn demo (chỉ đạo Admin Demo 23/7 — "icon, button đẹp đồng bộ, hiện đại hơn Zalo"):
+ * mọi button/link transition ngắn thống nhất + focus-visible ring brand (điều hướng bàn phím thấy
+ * rõ; chuột không bị ring thừa) + active nhấn nhẹ. KHÔNG đổi bảng màu brand. */
+button,
+a {
+  transition-property: color, background-color, border-color, box-shadow, transform, opacity, filter;
+  transition-duration: 0.15s;
+  transition-timing-function: ease;
+}
+button:active:not(:disabled) {
+  transform: scale(0.985);
+}
+:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Chip lọc phân loại (ChatListScreen — "Tất cả" + Công việc/Khách hàng/Đối soát...). 5/8 (Admin Demo "các nút
+ * Phân loại xấu, KHÔNG đồng nhất"): TRƯỚC ĐÂY active = nền phẳng 1 màu (gradient cho "Tất cả" NHƯNG màu đặc
+ * cho từng phân loại → 2 kiểu khác nhau, lệch nhau), inactive không viền. Nay CÙNG ngôn ngữ 3D với Button:
+ * active có highlight kính hắt trên (inset trắng) + đổ bóng MÀU theo chip (--chip-c, giữ đúng màu phân loại từ
+ * DB, KHÔNG bịa màu) + nhấc nhẹ khi hover; inactive có viền nhạt đồng nhất + hover nền brand-tint mượt. */
+.filter-chip {
+  border: 1px solid var(--color-line);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.filter-chip:not(.filter-chip--active):hover {
+  background-color: var(--color-brand-tint);
+  border-color: color-mix(in srgb, var(--color-brand) 35%, var(--color-line));
+}
+.filter-chip--active {
+  border-color: transparent;
+  color: #fff;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.35) inset,
+    0 -1px 0 rgba(15, 23, 42, 0.06) inset,
+    0 6px 14px -6px color-mix(in srgb, var(--chip-c, var(--color-brand)) 65%, transparent);
+}
+.filter-chip--active:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.4) inset,
+    0 -1px 0 rgba(15, 23, 42, 0.06) inset,
+    0 10px 18px -7px color-mix(in srgb, var(--chip-c, var(--color-brand)) 72%, transparent);
+}
+:root[data-theme='dark'] .filter-chip {
+  border-color: var(--color-line-dark);
+}
+:root[data-theme='dark'] .filter-chip:not(.filter-chip--active):hover {
+  background-color: var(--color-brand-dark-tint);
+  border-color: color-mix(in srgb, var(--color-brand) 45%, var(--color-line-dark));
+}
+
+/* Tôn trọng prefers-reduced-motion — tắt các chuyển động "nhấc/lún" (translate/scale) trên MỌI nút 3D + chip
+ * cho người dùng đã bật cờ giảm chuyển động ở hệ điều hành (giữ đổi màu/bóng, chỉ bỏ dịch chuyển vị trí). */
+@media (prefers-reduced-motion: reduce) {
+  .btn-glass:hover:not(:disabled),
+  .btn-primary:hover:not(:disabled),
+  .btn-danger:hover:not(:disabled),
+  .filter-chip--active:hover {
+    transform: none;
+  }
+  button:active:not(:disabled),
+  .btn-glass:active:not(:disabled),
+  .btn-primary:active:not(:disabled),
+  .btn-danger:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+/* Redesign Button (24/7, Admin Demo chốt phương án "B — Glass Depth" trong 4 phương án cho xem thử) —
+ * gradient tối dần trên→dưới + dải sáng hắt vắt ngang nửa trên (mặt kính cong) + bóng đổ màu lan rộng
+ * khi hover, nổi hẳn khỏi nền thay vì chuyển động nhấn-lún kiểu cũ. Giữ NGUYÊN 5 vai trò màu đã chốt
+ * (confirm/edit/danger/soft/neutral) — CHỈ đổi cách thể hiện, không đổi bảng màu. Dùng biến CSS
+ * --btn-c (màu gốc vai trò) để tính gradient/bóng qua color-mix(), Button.tsx gán qua style inline. */
+/* 3/8 (AGENT web-brand-sync — Admin Demo "lấy tone màu logo làm chủ đạo... toàn bộ nút đồng bộ 3D như desktop"):
+ * ĐỒNG BỘ với desktop `.btn-primary` — gradient 2 TÔNG chéo 135° theo hue ngữ nghĩa (confirm = brand→teal,
+ * edit = warning→cam, danger = đỏ→đỏ đậm) thay vì gradient CÙNG-tông cũ (color-mix brand→brand-đậm = "xanh
+ * mono", KHÔNG teal — đây LÀ lỗi Admin Demo báo nút "Đăng nhập" xanh 1 màu). Tông thứ 2 gán qua --btn-c2 từ
+ * Button.tsx; nếu không có (variant chỉ 1 tông) tự lùi về --btn-c → không nút nào phẳng. Giữ NGUYÊN dải sáng
+ * kính ::before + nhấc hover + lún active đã chốt (phương án "B — Glass Depth" 24/7). */
+.btn-glass {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, var(--btn-c) 0%, var(--btn-c2, var(--btn-c)) 100%);
+  box-shadow: 0 1px 1px rgba(255, 255, 255, 0.5) inset, 0 8px 20px -8px color-mix(in srgb, var(--btn-c) 70%, transparent);
+}
+.btn-glass::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 55% 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0));
+  pointer-events: none;
+}
+.btn-glass:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 1px 1px rgba(255, 255, 255, 0.55) inset, 0 14px 26px -10px color-mix(in srgb, var(--btn-c) 75%, transparent);
+}
+.btn-glass:active:not(:disabled) {
+  transform: translateY(0) scale(0.99);
+}
+.btn-glass--soft {
+  background: color-mix(in srgb, var(--btn-c) 12%, white);
+  color: var(--btn-c);
+  box-shadow: 0 1px 1px rgba(255, 255, 255, 0.3) inset;
+}
+.btn-glass--soft::before {
+  display: none;
+}
+.btn-glass--neutral {
+  background: linear-gradient(160deg, white, color-mix(in srgb, white 90%, black 4%));
+  color: #334155;
+  border: 1px solid var(--color-line);
+  box-shadow: 0 1px 1px rgba(255, 255, 255, 0.4) inset;
+}
+.btn-glass--neutral::before {
+  display: none;
+}
+:root[data-theme='dark'] .btn-glass--soft {
+  background: color-mix(in srgb, var(--btn-c) 20%, #191f2b);
+}
+:root[data-theme='dark'] .btn-glass--neutral {
+  background: linear-gradient(160deg, #20242e, #191f2b);
+  color: #cbd5e1;
+  border-color: var(--color-line-dark);
+}
+
+/* 5/8 (áp brand mới glass) — nền/gradient/rim/bóng của .btn-primary/.btn-teal/.btn-soft giờ do ./brand.css
+ * (nguồn duy nhất) định nghĩa. Ở đây CHỈ bổ sung phần brand.css KHÔNG có, cần cho các nút "thô" trong app:
+ *   1) nội dung (icon/chữ) nổi TRÊN dải sáng kính ::before (brand.css không set z-index cho con → icon bị
+ *      nửa trên phủ mờ). 2) giữ hình TRÒN cho nút icon dùng `rounded-full` (brand.css hardcode radius 16px là
+ *      rule không-layer → thắng utility `rounded-full`, sẽ vuông hoá nút gửi/camera nếu không chặn lại).
+ *      3) nhấc nhẹ khi hover cho ĐỒNG BỘ cảm giác 3D với .btn-glass (Button.tsx). */
+.btn-primary > *,
+.btn-teal > *,
+.btn-soft > * {
+  position: relative;
+  z-index: 1;
+}
+.btn-primary.rounded-full,
+.btn-teal.rounded-full,
+.btn-soft.rounded-full {
+  border-radius: 9999px;
+}
+.btn-primary:hover:not(:disabled),
+.btn-teal:hover:not(:disabled),
+.btn-soft:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+.btn-primary:active:not(:disabled),
+.btn-teal:active:not(:disabled),
+.btn-soft:active:not(:disabled) {
+  transform: translateY(0) scale(0.99);
+}
+
+/* danger thô (ConfirmDialog...) — cùng ngôn ngữ 3D, hue đỏ giữ ngữ nghĩa xoá/nguy hiểm. */
+.btn-danger {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, var(--color-danger) 0%, #b91c1c 100%);
+  color: #fff;
+  box-shadow: 0 1px 1px rgba(255, 255, 255, 0.35) inset, 0 10px 24px -10px rgba(220, 38, 38, 0.7);
+  transition: transform 0.16s cubic-bezier(0.22, 0.61, 0.36, 1), box-shadow 0.16s ease, filter 0.16s ease;
+}
+.btn-danger::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 55% 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0));
+  pointer-events: none;
+}
+.btn-danger > * {
+  position: relative;
+  z-index: 1;
+}
+.btn-danger:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 1px 1px rgba(255, 255, 255, 0.45) inset, 0 16px 30px -10px rgba(220, 38, 38, 0.78);
+}
+.btn-danger:active:not(:disabled) {
+  transform: translateY(0) scale(0.99);
+}
+
+/* Nút gạt (Toggle) — CÙNG đợt redesign 24/7, đồng bộ cảm giác 3D/hiện đại với Button. Track gradient
+ * chìm (inset) khi tắt, nổi gradient brand khi bật; nút tròn có bóng đổ + viền sáng mô phỏng chất
+ * liệu vật lý (giống công tắc thật) thay vì phẳng 1 màu như trước. */
+.toggle-3d {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 44px;
+  height: 26px;
+  border-radius: 999px;
+  cursor: pointer;
+  flex: none;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+  background: linear-gradient(180deg, #cbd5e1, #e2e8f0);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.15) inset, 0 1px 0 rgba(255, 255, 255, 0.5);
+  border: none;
+  padding: 0;
+}
+/* 5/8 (Admin Demo "toggle bật xanh dương ĐẶC lệch tông với sidebar/nút") — nút gạt BẬT nay dùng CHÍNH
+ * `var(--gradient-brand)` (#1877d6→#3bc3d0) — CÙNG một gradient brand với sidebar active + chip "Tất cả"
+ * active → mọi accent brand đồng nhất 1 tông, hết "xanh dương đặc" lệch. */
+.toggle-3d[data-on='true'] {
+  background: var(--gradient-brand);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--color-brand) 55%, transparent) inset, 0 0 0 3px color-mix(in srgb, var(--color-brand) 16%, transparent);
+}
+.toggle-3d .toggle-3d-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ffffff, #eef1f6);
+  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.25), 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.toggle-3d[data-on='true'] .toggle-3d-knob {
+  transform: translateX(18px);
+}
+.toggle-3d:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Màn cuộc gọi đến (25/7, Admin Demo chốt phương án "B — Radar quét" trong 2 phương án cho xem thử qua
+ * Artifact) — nền tối + vòng tròn lan tỏa từ tâm mô phỏng sóng radar, đồng hồ số sống, avatar nhấp nháy 3
+ * vòng lệch nhịp, nút Nghe có nhịp thở kêu gọi bấm (đồng bộ .btn-glass đã chốt cho Button). */
+.incoming-call-bg {
+  background: linear-gradient(160deg, #0a1428 0%, #050810 60%, #020306 100%);
+}
+.incoming-call-radar {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+  border-radius: 9999px;
+  border: 1.5px solid rgba(22, 87, 208, 0.55);
+  animation: incomingRadarExpand 3s cubic-bezier(0.2, 0.6, 0.4, 1) infinite;
+}
+.incoming-call-radar.r2 {
+  animation-delay: 1s;
+  border-color: rgba(124, 58, 237, 0.4);
+}
+.incoming-call-radar.r3 {
+  animation-delay: 2s;
+  border-color: rgba(22, 163, 74, 0.35);
+}
+@keyframes incomingRadarExpand {
+  0% {
+    width: 40px;
+    height: 40px;
+    margin: -20px 0 0 -20px;
+    opacity: 0.9;
+  }
+  100% {
+    width: 640px;
+    height: 640px;
+    margin: -320px 0 0 -320px;
+    opacity: 0;
+  }
+}
+.incoming-call-clock {
+  font-variant-numeric: tabular-nums;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(6px);
+}
+.incoming-call-avatar-ring {
+  position: absolute;
+  inset: -14px;
+  border-radius: 9999px;
+  border: 2.5px solid rgba(255, 255, 255, 0.55);
+  animation: incomingRingPulse 1.8s ease-out infinite;
+}
+.incoming-call-avatar-ring.p2 {
+  animation-delay: 0.6s;
+}
+.incoming-call-avatar-ring.p3 {
+  animation-delay: 1.2s;
+}
+@keyframes incomingRingPulse {
+  0% {
+    transform: scale(0.92);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+.incoming-call-avatar {
+  animation: incomingAvatarBreath 2.4s ease-in-out infinite;
+}
+@keyframes incomingAvatarBreath {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.035);
+  }
+}
+.incoming-call-accept {
+  animation: incomingAcceptPulse 1.6s ease-in-out infinite;
+}
+@keyframes incomingAcceptPulse {
+  0%,
+  100% {
+    box-shadow: 0 10px 22px -8px rgba(22, 163, 74, 0.7), 0 0 0 0 rgba(34, 197, 94, 0.5);
+  }
+  50% {
+    box-shadow: 0 10px 22px -8px rgba(22, 163, 74, 0.7), 0 0 0 10px rgba(34, 197, 94, 0);
+  }
+}
+.incoming-call-status-dot {
+  animation: incomingDotBlink 1s ease-in-out infinite;
+}
+@keyframes incomingDotBlink {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Ô ICON (icon-tile) — 5/8 (Admin Demo: "icon tile phải ĐẬM hơn NÚT một chút để NỔI hơn"). Nút chính
+ * (.btn-primary) là cyan SÁNG glass; ô icon vuông-bo dùng gradient brand ĐẬM (#1877d6→#135fb0 =
+ * brand→brand-hover) + icon trắng → NỔI trên nền/nút sáng. Định nghĩa Y HỆT apps/landing (đồng nhất
+ * landing ↔ app). */
+.icon-tile {
+  background: linear-gradient(160deg, var(--color-brand), var(--color-brand-hover));
+  color: #fff;
+}
+
+/* NGÀY VN (Admin Demo 2/9 "ngày hiện phải dd/mm/yyyy VN, diệt 08/30/2026 kiểu Mỹ"): <input type=date> hiện phần CHỮ
+   theo LOCALE MÁY (máy Mỹ → mm/dd/yyyy). Ẩn phần chữ đó, CHỈ giữ icon lịch bấm chọn. Ngày VN đã hiện ở ô text dd/mm
+   bên cạnh. Áp class .date-vn-icon cho các ô chọn-ngày kiểu icon (review OCR POS/CK). */
+input[type="date"].date-vn-icon::-webkit-datetime-edit,
+input[type="date"].date-vn-icon::-webkit-inner-spin-button,
+input[type="date"].date-vn-icon::-webkit-clear-button { display: none; -webkit-appearance: none; appearance: none; }
+input[type="date"].date-vn-icon::-webkit-calendar-picker-indicator { opacity: 1; cursor: pointer; }

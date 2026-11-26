@@ -1,0 +1,32 @@
+{
+  "name": "@sigma/quanly-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SigMa — REST API (thay thick-client nối Postgres trực tiếp). App desktop máy TRONG+NGOÀI gọi HTTPS alpha-quanly-api.example.com → service → Postgres sigma. Reuse 40 service DI của apps/desktop.",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@sigma/business-rules": "*",
+    "@sigma/database": "*",
+    "@sigma/services": "*",
+    "@sigma/shared": "*",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.6.0"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.7",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.10"
+  }
+}

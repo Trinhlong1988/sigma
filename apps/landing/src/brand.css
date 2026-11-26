@@ -1,0 +1,46 @@
+/* === BRAND STUDIO (tu dong sinh boi scripts/brand_sync.py — DUNG SUA TAY) === */
+/* Doi brand: sua assets/brand/brand.tokens.json + thay icon master -> npm run brand:sync */
+@theme {
+  --color-brand: #1877d6;
+  --color-brand-hover: #135fb0;
+  --color-brand-deep: #1763a5;
+  --color-brand-teal: #3bc3d0;
+  --color-brand-teal-hover: #2aa3b0;
+  --color-brand-tint: #eaf4fb;
+  --color-brand-dark-tint: #123349;
+  --color-sky: #5da9e7;
+  --color-ink: #0f1a24;
+  --gradient-brand: linear-gradient(160deg, #1877d6, #3bc3d0);
+  --gradient-accent: linear-gradient(180deg, #cbf2fd 0%, #7cc4e6 45%, #0f9fe0 100%);
+  --radius-tile: 20px;
+  --radius-button: 999px;
+}
+/* Button = PILL GLASS (mau/chuyen-mau/vien lay tu anh tham chieu, dam hon ~10%). Giu font he thong SigMa. */
+.btn-primary,.btn-teal,.btn-soft,.btn-danger{position:relative;overflow:hidden;border-radius:999px;font-weight:700;
+  transition:transform .12s ease,box-shadow .12s ease,filter .12s ease;-webkit-font-smoothing:antialiased}
+.btn-primary::before,.btn-teal::before,.btn-soft::before,.btn-danger::before{content:"";position:absolute;left:6px;right:6px;top:2px;height:46%;
+  border-radius:999px;background:linear-gradient(180deg,rgba(255,255,255,.85),rgba(255,255,255,0));pointer-events:none}
+.btn-primary:active,.btn-teal:active,.btn-soft:active,.btn-danger:active{transform:translateY(1px)}
+.btn-primary{color:#fff;text-shadow:0 1px 2px rgba(10,74,120,.55);
+  background:linear-gradient(180deg,#cbf2fd 0%,#7cc4e6 45%,#0f9fe0 100%);
+  border:2px solid #a3defd;
+  box-shadow:0 0 0 1px rgba(163,222,253,0.55),0 0 16px 2px rgba(94,174,222,0.55),inset 0 2px 3px rgba(255,255,255,.9),inset 0 -8px 13px rgba(15,159,224,0.5)}
+.btn-primary:hover{filter:brightness(1.05);box-shadow:0 0 0 1px rgba(163,222,253,0.65),0 0 24px 4px rgba(94,174,222,0.7),inset 0 2px 3px rgba(255,255,255,.95),inset 0 -8px 13px rgba(15,159,224,0.55)}
+.btn-teal{color:#fff;text-shadow:0 1px 2px rgba(8,86,92,.55);
+  background:linear-gradient(180deg,#c9f6f4 0%,#5fd0d8 45%,#17b0bf 100%);
+  border:2px solid #a9eef2;
+  box-shadow:0 0 0 1px rgba(120,225,230,.55),0 0 16px 2px rgba(59,195,208,.5),inset 0 2px 3px rgba(255,255,255,.9),inset 0 -8px 13px rgba(23,176,191,0.5)}
+.btn-teal:hover{filter:brightness(1.05)}
+.btn-soft{color:#135fb0;
+  background:linear-gradient(180deg,#eefaff 0%,#cfeefb 100%);
+  border:2px solid #a3defd;
+  box-shadow:0 0 12px rgba(94,174,222,.4),inset 0 2px 3px #fff}
+.btn-soft:hover{filter:brightness(1.02)}
+.btn-danger{color:#fff;text-shadow:0 1px 2px rgba(120,20,20,.5);
+  background:linear-gradient(180deg,#ff9a9a 0%,#f26363 45%,#d92d2d 100%);
+  border:2px solid #ffc2c2;
+  box-shadow:0 0 0 1px rgba(255,180,180,.55),0 0 16px 2px rgba(226,59,59,.45),inset 0 2px 3px rgba(255,255,255,.7),inset 0 -8px 13px rgba(180,30,30,.4)}
+.btn-danger:hover{filter:brightness(1.05)}
+.card-glass{border-radius:var(--radius-tile);
+  background:linear-gradient(160deg,rgba(255,255,255,.9),#eaf4fb 70%,#dcebf8);
+  border:1px solid rgba(255,255,255,.7);box-shadow:0 10px 30px rgba(24,119,214,.16),inset 0 1px 0 #fff}

@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SigMa</string>
+    <string name="title_activity_main">SigMa</string>
+    <string name="package_name">com.sigma.app</string>
+    <string name="custom_url_scheme">com.sigma.app</string>
+
+    <!-- B115-tiếp (2/8) — bot-api base URL dùng RIÊNG cho ReplyReceiver.java (trả lời trực tiếp tại notification,
+         KHÔNG mở app nên KHÔNG đọc được import.meta.env.VITE_BOT_API_URL phía JS/Vite). PHẢI giữ ĐỒNG BỘ TAY với
+         VITE_BOT_API_URL dùng lúc build web (.env web-demo) — 2 cấu hình build-time ĐỘC LẬP, đổi 1 bên PHẢI đổi
+         theo bên kia trước khi build APK release (giới hạn đã biết, ghi rõ KHÔNG lờ đi — xem BUGS_FIXED.md B115). -->
+    <string name="bot_api_base_url" translatable="false">https://sigma-api.example.com</string>
+</resources>

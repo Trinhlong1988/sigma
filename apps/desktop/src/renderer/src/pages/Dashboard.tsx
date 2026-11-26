@@ -1,0 +1,992 @@
+import { useEffect, useState } from 'react';
+import { LayoutDashboard, Users, ShieldCheck, Settings, LogOut, ChevronDown, HardDrive, CreditCard, Landmark, Wallet, FolderKanban, Inbox, KeyRound, TrendingUp, ClipboardCheck, PackageOpen, Loader2, RefreshCw, UserRound, BarChart3, Coins, PiggyBank, Clock, Search as SearchIcon, Camera, Monitor, FileText, Receipt, Menu } from 'lucide-react';
+
+const SEARCH_KIND_LABEL: Record<string, string> = { customer: 'Khách hàng', tid: 'TID', pos: 'Máy POS', transaction: 'Giao dịch', dossier: 'Hồ sơ HKD' };
+
+/** Tìm kiếm toàn cục trên topbar — debounce 250ms, chỉ trả bản ghi có quyền (backend), nhóm theo loại, điều hướng khi chọn.
+ *  Không phát request cho chuỗi < 2 ký tự; hủy kết quả cũ (token) chống race; Esc đóng. */
+function TopbarSearch({ onNavigate }: { onNavigate: (page: string, term?: string, kind?: string, id?: number) => void }): JSX.Element {
+  const [q, setQ] = useState('');
+  const [hits, setHits] = useState<SearchHitDto[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    const query = q.trim();
+    if (query.length < 2) { setHits([]); setLoading(false); return; }
+    let alive = true;
+    setLoading(true);
+    const t = setTimeout(async () => {
+      const res = await window.api.globalSearch(query);
+      if (!alive) return;
+      setHits(res.ok && res.data ? res.data : []);
+      setLoading(false);
+    }, 250);
+    return () => { alive = false; clearTimeout(t); };
+  }, [q]);
+  return (
+    <div className="relative w-72" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOpen(false); }}>
+      <div className="flex items-center gap-2 rounded-lg border border-line bg-appbg px-3 py-1.5 focus-within:border-brand">
+        <SearchIcon className="h-4 w-4 shrink-0 text-slate-400" />
+        <input
+          value={q}
+          onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(e) => { if (e.key === 'Escape') { setOpen(false); (e.target as HTMLInputElement).blur(); } }}
+          placeholder="Tìm khách / TID / máy POS / mã GD…"
+          className="w-full bg-transparent text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none"
+        />
+      </div>
+      {open && q.trim().length >= 2 && (
+        <div className="absolute left-0 z-40 mt-1 max-h-96 w-96 overflow-y-auto rounded-lg border border-line bg-white py-1 shadow-xl">
+          {loading && <div className="px-3 py-2 text-xs text-slate-400">Đang tìm…</div>}
+          {!loading && hits.length === 0 && <div className="px-3 py-2 text-xs text-slate-400">Không có kết quả cho “{q.trim()}”.</div>}
+          {!loading && hits.map((h) => (
+            <button
+              key={`${h.kind}-${h.id}`}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { onNavigate(h.page, h.code, h.kind, h.id); setOpen(false); setQ(''); }}
+              className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-appbg"
+            >
+              <span className="rounded bg-brand-tint px-1.5 py-0.5 text-[10px] font-semibold text-brand">{SEARCH_KIND_LABEL[h.kind] ?? h.kind}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-slate-700">{h.label}</span>
+                <span className="block truncate text-xs text-slate-400">{h.code}{h.sub ? ` · ${h.sub}` : ''}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Đồng hồ realtime trên topbar — cập nhật mỗi giây, Intl (Asia/Ho_Chi_Minh), cleanup timer khi unmount.
+ *  Chỉ hiển thị — KHÔNG dùng làm nguồn ngày nghiệp vụ/audit. State cục bộ → không re-render toàn dashboard. */
+function TopbarClock(): JSX.Element {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const time = new Intl.DateTimeFormat('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Ho_Chi_Minh' }).format(now);
+  const date = new Intl.DateTimeFormat('vi-VN', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Asia/Ho_Chi_Minh' }).format(now);
+  return (
+    <div className="flex items-center gap-2.5 rounded-xl border border-line bg-white px-3 py-1.5 shadow-sm">
+      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-tint">
+        <Clock className="h-[15px] w-[15px] text-brand" />
+      </div>
+      <div className="leading-tight">
+        <div className="font-mono text-[15px] font-bold tabular-nums tracking-tight text-slate-800">{time}</div>
+        <div className="text-[10px] font-medium capitalize text-slate-400">{date}</div>
+      </div>
+    </div>
+  );
+}
+/** Nút chụp vùng màn hình 2 chế độ (Admin Demo 15/7, như Zalo): "Chụp cả app" (giữ cửa sổ SigMa trong ảnh) và
+ *  "Chụp màn hình (ẩn app)" (thu nhỏ SigMa rồi chụp — chỉ còn màn hình/ứng dụng phía sau). Lưu Pictures/SigMa-Screenshots. */
+function ScreenshotButton(): JSX.Element {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  async function shoot(hideApp: boolean): Promise<void> {
+    setOpen(false);
+    const res = await window.api.captureRegion({ hideApp });
+    if (res.ok && res.path) toast.success('Đã lưu ảnh: ' + res.path);
+    else if (res.error !== 'CANCELLED') toast.alert(res.message ?? 'Chụp màn hình thất bại.', 'Lỗi chụp');
+  }
+  return (
+    <div className="relative" onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOpen(false); }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="Chụp vùng màn hình (kéo chọn vùng, lưu vào Pictures/SigMa-Screenshots)"
+        className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-appbg hover:text-brand"
+      >
+        <Camera className="h-[19px] w-[19px]" />
+      </button>
+      {open && (
+        <div className="absolute right-0 z-40 mt-1 w-64 overflow-hidden rounded-lg border border-line bg-white py-1 shadow-xl">
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => void shoot(false)} className="flex w-full items-start gap-2.5 px-3 py-2 text-left hover:bg-appbg">
+            <Camera className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+            <span><span className="block text-sm font-medium text-slate-700">Chụp cả app</span><span className="block text-xs text-slate-400">Giữ nguyên cửa sổ SigMa trong ảnh</span></span>
+          </button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => void shoot(true)} className="flex w-full items-start gap-2.5 px-3 py-2 text-left hover:bg-appbg">
+            <Monitor className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+            <span><span className="block text-sm font-medium text-slate-700">Chụp màn hình (ẩn app)</span><span className="block text-xs text-slate-400">Thu nhỏ SigMa, chỉ chụp màn hình phía sau</span></span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+import type { DashboardStats, OnlineUserDto, SearchHitDto } from '../../../preload/index.d';
+import { AlphaLogo } from '../components/AlphaLogo.js';
+import { Button } from '../components/Button.js';
+import { useToast } from '../lib/toast.js';
+import { coDesktop } from '../lib/platform.js';
+import type { AuthUser } from '@sigma/shared';
+import { hasPermission, hasAnyPermission } from '@sigma/shared';
+import { MessagesDrawer } from '../components/MessagesDrawer.js';
+import { ChangePasswordModal } from '../components/ChangePasswordModal.js';
+import { Level2PasswordModal } from '../components/Level2PasswordModal.js';
+import { StaffManagementPage } from './StaffManagementPage.js';
+import { TabBar, TabButton } from '../components/Tabs.js';
+import { FinancePage } from './FinancePage.js';
+import { SystemConfigPage } from './SystemConfigPage.js';
+import { PosPage } from './PosPage.js';
+import { TidPage } from './TidPage.js';
+import { BankConfigPage } from './BankConfigPage.js';
+import { DossierPage } from './DossierPage.js';
+import { RevenueDebtPage } from './RevenueDebtPage.js';
+import { BillManualEntryPage } from './BillManualEntryPage.js';
+import { InvestorSelfViewPage } from './InvestorSelfViewPage.js';
+import { ApprovalPage } from './ApprovalPage.js';
+import { ExportApprovalPage } from './ExportApprovalPage.js';
+import { BillExplainPage } from './BillExplainPage.js';
+import { UpdateBanner } from '../components/UpdateBanner.js';
+import { useRealtime } from '../lib/realtime.js';
+
+interface MenuItem {
+  key: string;
+  label: string;
+  icon: JSX.Element;
+  /** Permission(s) required to see the item; undefined = always visible. Any-of semantics. */
+  perms?: string[];
+  /** Show a live badge (e.g. undelivered TID count / pending cancel-approvals). */
+  badge?: 'undeliveredTid' | 'pendingCancels';
+  /** Visually a sub-item of the group above (indented). */
+  indent?: boolean;
+  /** [Admin Demo 15/11] KHÔNG hiện trong danh sách menu (vẫn định tuyến được) — dùng cho "Trang chủ" đã
+   *  đưa lên cạnh chữ SigMa. Bỏ hẳn khỏi MENU thì `activeItem` rơi về mục đầu ⇒ bấm logo ra sai trang. */
+  anTrongDanhSach?: boolean;
+}
+
+// Thứ tự menu theo IMS_SPEC (LEAD 9/7): Trang chủ → Nhân sự (Vai trò & Quyền là mục con) →
+// Khách hàng → Máy POS → TID → Nhật ký → Cài đặt → Backup.
+// [Admin Demo 15/11] THỨ TỰ CHỐT: Doanh Số → TID → Máy POS → Ngân Hàng-Đối Tác → Hồ Sơ HKD →
+// Doanh Thu-Công Nợ & Tài Chính (GỘP 1) → còn lại. "Trang chủ" rời khỏi danh sách, lên cạnh chữ SigMa.
+const MENU: MenuItem[] = [
+  { key: 'doanhso', label: 'Doanh Số', icon: <Receipt className="h-[18px] w-[18px]" />, perms: ['REVENUE_VIEW', 'REVENUE_MANAGE'] },
+  // [Admin Demo 24/11] Doanh số TIỀN CHỜ / công nợ phải thu ỦY QUYỀN — mục RIÊNG, TÁCH khỏi Doanh Số (chống đếm đúp).
+  { key: 'tiencho', label: 'Doanh số tiền chờ', icon: <Clock className="h-[18px] w-[18px]" />, perms: ['REVENUE_VIEW', 'REVENUE_MANAGE'] },
+  { key: 'tid', label: 'Quản Lý TID', icon: <CreditCard className="h-[18px] w-[18px]" />, perms: ['TID_VIEW', 'CONFIG_TID_VIEW'], badge: 'undeliveredTid' },
+  // PHASE K1 — "Cấu hình máy POS" + "Danh mục kho" đã là TAB của trang này ⇒ menu hiện với bất kỳ quyền nào trong nhóm.
+  { key: 'pos', label: 'Quản Lý Máy POS', icon: <HardDrive className="h-[18px] w-[18px]" />, perms: ['POS_VIEW', 'CONFIG_POS_SUPPLY_VIEW', 'CONFIG_WAREHOUSE_VIEW'] },
+  { key: 'bankcfg', label: 'Quản Lý Ngân Hàng - Đối Tác', icon: <Landmark className="h-[18px] w-[18px]" />, perms: ['CONFIG_BANK_VIEW', 'CONFIG_FEE_VIEW', 'CONFIG_INDUSTRY_VIEW', 'CONFIG_HANDOVER_VIEW'] },
+  { key: 'dossier', label: 'Quản Lý Hồ Sơ HKD', icon: <FolderKanban className="h-[18px] w-[18px]" />, perms: ['CONFIG_DOSSIER_VIEW'] },
+  // GỘP 1 (Admin Demo 15/11): "Doanh Thu & Công Nợ" + "Tài Chính" thành MỘT mục, 2 tab bên trong.
+  { key: 'revdebt', label: 'Doanh Thu - Công Nợ & Tài Chính', icon: <TrendingUp className="h-[18px] w-[18px]" />, perms: ['REVENUE_VIEW', 'DEBT_VIEW', 'DEVICE_SALE_VIEW', 'CASHENTRY_VIEW', 'FUND_VIEW', 'CASHCAT_VIEW'] },
+  { key: 'staff', label: 'Quản Lý Nhân Sự', icon: <Users className="h-[18px] w-[18px]" />, perms: ['USER_READ', 'ROLE_READ', 'CUSTOMER_VIEW', 'CONFIG_RCV_ACCT_VIEW'] },
+  // SELF-VIEW NĐT (12/8) — CHỈ cho tài khoản NĐT/kế toán; nhân sự SigMa xem NĐT trong mục gộp ở trên.
+  { key: 'myinvestor', label: 'Báo cáo Nhà đầu tư', icon: <TrendingUp className="h-[18px] w-[18px]" />, perms: ['INVESTOR_SELF_VIEW'] },
+  { key: 'billexplain', label: 'Bill Giải Trình', icon: <FileText className="h-[18px] w-[18px]" />, perms: ['BILLEXPLAIN_VIEW'] },
+  { key: 'approval', label: 'Quản lý dữ liệu yêu cầu duyệt hủy', icon: <ClipboardCheck className="h-[18px] w-[18px]" />, perms: ['BILL_CANCEL_APPROVE', 'TID_CANCEL_APPROVE', 'POS_CANCEL_APPROVE', 'CUSTOMER_CANCEL_APPROVE', 'USER_CANCEL_APPROVE'], badge: 'pendingCancels' },
+  { key: 'exportapproval', label: 'Duyệt xuất kho', icon: <PackageOpen className="h-[18px] w-[18px]" />, perms: ['EXPORT_REQUEST_APPROVE'] },
+  { key: 'system', label: 'Quản Lý Cấu Hình Hệ Thống', icon: <Settings className="h-[18px] w-[18px]" />, perms: ['AUDIT_LOG_VIEW', 'SYSTEM_SETTING_VIEW', 'BACKUP_CREATE', 'BACKUP_RESTORE', 'STORAGE_VIEW', 'TRASH_VIEW'] },
+  // Trang chủ: vẫn định tuyến được (bấm logo), nhưng KHÔNG nằm trong danh sách menu.
+  { key: 'dashboard', label: 'Trang chủ', icon: <LayoutDashboard className="h-[18px] w-[18px]" />, perms: ['DASHBOARD_VIEW'], anTrongDanhSach: true }
+];
+
+/**
+ * [Admin Demo 15/11 "quản lý doanh thu công nợ tài chính gộp 1"] MỘT mục menu, 2 tab bên trong.
+ * Tab nào người dùng KHÔNG có quyền thì không vẽ — và nếu chỉ có quyền 1 bên thì vào thẳng bên đó,
+ * không hiện thanh tab 1 nút (đỡ rác màn).
+ */
+function DoanhThuVaTaiChinh({ user, initialJump }: { user: AuthUser; initialJump?: { kind?: string; id?: number; term?: string } }): JSX.Element {
+  const coDoanhThu = hasAnyPermission(user, ['REVENUE_VIEW', 'DEBT_VIEW', 'DEVICE_SALE_VIEW']);
+  const coTaiChinh = hasAnyPermission(user, ['CASHENTRY_VIEW', 'FUND_VIEW', 'CASHCAT_VIEW']);
+  const [tab, setTab] = useState<'revdebt' | 'finance'>(coDoanhThu ? 'revdebt' : 'finance');
+  const dangXem = coDoanhThu && coTaiChinh ? tab : coDoanhThu ? 'revdebt' : 'finance';
+  return (
+    <>
+      {coDoanhThu && coTaiChinh && (
+        <TabBar>
+          <TabButton active={dangXem === 'revdebt'} onClick={() => setTab('revdebt')} icon={<TrendingUp className="h-4 w-4" />}>
+            Doanh Thu &amp; Công Nợ
+          </TabButton>
+          <TabButton active={dangXem === 'finance'} onClick={() => setTab('finance')} icon={<Wallet className="h-4 w-4" />}>
+            Tài Chính
+          </TabButton>
+        </TabBar>
+      )}
+      {dangXem === 'revdebt'
+        ? <RevenueDebtPage user={user} initialJump={initialJump} />
+        : <FinancePage user={user} />}
+    </>
+  );
+}
+
+export function Dashboard({ user, onLogout }: { user: AuthUser; onLogout: () => void }): JSX.Element {
+  const toast = useToast();
+  // [KẾ TOÁN NĐT 24/11] Vai Kế toán NĐT có một số quyền "xem" (TID/POS/ngân hàng/TK nhận) CHỈ để màn Doanh Số
+  // hoạt động — KHÔNG được mở các màn quản lý đó. Nên NGOÀI lọc theo quyền, còn WHITELIST đúng 2 mục: Doanh Số +
+  // Báo cáo Nhà đầu tư (và Trang chủ ẩn cho định tuyến logo). Ẩn UI; backend đã khóa phạm vi độc lập (không chỉ ẩn).
+  const laKeToanNdt = (user.roles ?? []).includes('R_KETOAN_NDT');
+  const CHO_PHEP_KETOAN_NDT = new Set(['doanhso', 'myinvestor', 'dashboard']);
+  const visible = MENU.filter(
+    (m) => (!laKeToanNdt || CHO_PHEP_KETOAN_NDT.has(m.key)) && (!m.perms || hasAnyPermission(user, m.perms))
+  );
+  // [15/11] Nav CHỈ vẽ mục không bị ẩn; `visible` vẫn giữ đủ để định tuyến (Trang chủ bấm từ logo).
+  const hienTrongNav = visible.filter((m) => !m.anTrongDanhSach);
+  const KHOA_MAN = 'alpha.man-dang-xem';
+  const [active, setActive] = useState(() => {
+    try {
+      const cu = sessionStorage.getItem(KHOA_MAN);
+      // Chỉ nhận lại màn mà user NÀY còn quyền xem — đổi quyền xong F5 không được lọt vào màn cấm.
+      if (cu && (!laKeToanNdt || CHO_PHEP_KETOAN_NDT.has(cu)) && MENU.some((m) => m.key === cu && (m.perms ?? []).some((q) => (user.permissions ?? []).includes(q)))) return cu;
+    } catch {
+      /* trình duyệt chặn sessionStorage (chế độ riêng tư) → dùng màn mặc định */
+    }
+    return visible[0]?.key ?? 'dashboard';
+  });
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(KHOA_MAN, active);
+    } catch {
+      /* không lưu được thì thôi, không phải lỗi nghiệp vụ */
+    }
+  }, [active]);
+  // Nhảy từ ô tìm kiếm topbar: mở trang đích + lọc sẵn theo mã bản ghi đã chọn (để "thấy ngay" thay vì lạc trong list).
+  const [jump, setJump] = useState<{ page: string; term: string; kind?: string; id?: number } | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [undeliveredCount, setUndeliveredCount] = useState(0);
+  const { pendingCancels } = useRealtime(); // R48 Pha 4 — badge số yêu cầu hủy đang chờ duyệt (realtime poll)
+  const [showInbox, setShowInbox] = useState(false);
+  const [showChangePw, setShowChangePw] = useState(false);
+  const [showLevel2, setShowLevel2] = useState(false);
+
+  // Admin Demo 15/7 — bấm Đăng xuất PHẢI xác nhận (chống thoát nhầm).
+  async function confirmLogout(): Promise<void> {
+    setMenuOpen(false);
+    const ok = await toast.confirm('Bạn có chắc muốn đăng xuất khỏi hệ thống?', { title: 'Xác nhận đăng xuất', okLabel: 'Đăng xuất', cancelLabel: 'Ở lại' });
+    if (ok) onLogout();
+  }
+  const [unread, setUnread] = useState(0);
+  const [storageOver, setStorageOver] = useState<{ pct: number | null; threshold: number } | null>(null);
+  const [storageDismissed, setStorageDismissed] = useState(false);
+  // Cảnh báo "bộ nhớ sắp đầy" CHỈ hiện THỨ 2 HÀNG TUẦN, 1 lần/tuần (Admin Demo 11/8 — bỏ báo bật liên tục).
+  const storageWeekKey = (): string => { const t = new Date(); t.setHours(0, 0, 0, 0); t.setDate(t.getDate() - ((t.getDay() + 6) % 7)); return t.getFullYear() + '-' + (t.getMonth() + 1) + '-' + t.getDate(); }; // ngày thứ 2 của tuần
+  const storageWarnDue = (): boolean => { if (new Date().getDay() !== 1) return false; try { return localStorage.getItem('alpha-storage-warn-week') !== storageWeekKey(); } catch { return true; } };
+  const markStorageWarn = (): void => { try { localStorage.setItem('alpha-storage-warn-week', storageWeekKey()); } catch { /* ignore */ } };
+  // [B220 20/11 — Admin Demo "thêm nút tắt bên cạnh Xuất Excel để vào danh sách TID"] Màn con KHÔNG tự
+  // chuyển trang được (việc chuyển nằm ở đây), nên dùng một sự kiện chung: màn con phát, Dashboard nghe.
+  useEffect(() => {
+    function diToi(e: Event): void {
+      const ct = e as CustomEvent<{ trang?: string; tim?: string }>;
+      const trang = ct.detail?.trang;
+      if (!trang) return;
+      setJump(ct.detail?.tim ? { page: trang, term: ct.detail.tim } : null);
+      setActive(trang);
+    }
+    window.addEventListener('alpha:di-toi-trang', diToi);
+    return () => window.removeEventListener('alpha:di-toi-trang', diToi);
+  }, []);
+  const [appVersion, setAppVersion] = useState('');
+  // [B215 20/11 — Admin Demo "chưa lên feed"] NÚT KIỂM TRA CẬP NHẬT. App chỉ hỏi feed lúc khởi động rồi
+  // theo chu kỳ, nên vừa ship xong mà app đang mở thì chưa biết — Admin Demo tưởng chưa đẩy bản.
+  // Nút này hỏi NGAY và PHẢI nói kết quả cả khi KHÔNG có bản mới (im lặng là người dùng lại tưởng hỏng).
+  const [dangKiemCapNhat, setDangKiemCapNhat] = useState(false);
+  async function kiemCapNhat(): Promise<void> {
+    setDangKiemCapNhat(true);
+    try {
+      // [B226 21/11 — Admin Demo "bấm cập nhật không tải được"] DÙNG KẾT QUẢ THẬT của lần hỏi.
+      // TRƯỚC ĐÂY: gọi xong rồi NGỦ CỨNG 2,5 giây và đọc bộ nhớ sự kiện. Mạng chậm hơn 2,5 giây hoặc
+      // máy chủ lỗi ⇒ bộ nhớ rỗng ⇒ app báo "Đang dùng bản mới nhất" DÙ CHƯA HỎI ĐƯỢC ⇒ người dùng
+      // bấm mãi không thấy gì, tưởng app hỏng. Cấm đoán: hỏi không được thì phải NÓI là không hỏi được.
+      const kq = (await window.api.checkUpdate()) as { ok?: boolean; version?: string | null; coBanMoi?: boolean; message?: string } | undefined;
+      if (kq && kq.ok === false) {
+        toast.alert('Không hỏi được máy chủ cập nhật: ' + (kq.message ?? 'không rõ lý do'), 'Kiểm tra cập nhật');
+      } else {
+        // Bản cũ của máy chủ cập nhật không trả kết quả → lùi về cách cũ (đọc bộ nhớ sự kiện) thay vì báo bừa.
+        // [B250 22/11] DÙNG CỜ `coBanMoi` của máy chủ cập nhật: `version` là bản mới nhất TRÊN FEED,
+        // bằng bản đang chạy cũng vẫn có giá trị ⇒ so chuỗi tay dễ báo nhầm "có bản mới" chính nó.
+        const banMoi = kq?.version
+          ?? ((await window.api.getLastAvailableUpdate?.()) as { version?: string } | null)?.version;
+        const thucSuMoi = kq?.coBanMoi ?? (banMoi != null && banMoi !== appVersion);
+        if (banMoi && thucSuMoi) {
+          toast.success('Có bản mới v' + banMoi + ' — đang tải về, tải xong app sẽ báo để cài.');
+        } else {
+          toast.success('Đang dùng bản mới nhất (v' + (appVersion || '?') + ').');
+        }
+      }
+    } catch (e) {
+      toast.alert('Không hỏi được máy chủ cập nhật: ' + String(e), 'Kiểm tra cập nhật');
+    } finally {
+      setDangKiemCapNhat(false);
+    }
+  }
+  const [srvInfo, setSrvInfo] = useState<{ api: string; database: string } | null>(null);
+
+  const canInbox = hasPermission(user, 'MESSAGE_VIEW');
+  const canStorage = hasPermission(user, 'STORAGE_VIEW');
+  const canSend = hasPermission(user, 'MESSAGE_SEND');
+  const canLevel2 = hasPermission(user, 'LEVEL2_MANAGE');
+
+  useEffect(() => {
+    if (!hasPermission(user, 'TID_VIEW')) return;
+    window.api.notifyUndeliveredSummary().then((r) => {
+      if (r.ok && r.data) setUndeliveredCount(r.data.count);
+    });
+  }, [user, active]);
+
+  // Hòm thư: bộ đếm chưa đọc realtime (Cách A — poll mỗi 10s; nâng WebSocket khi lên VPS).
+  useEffect(() => {
+    if (!canInbox) return;
+    let alive = true;
+    const tick = (): void => {
+      window.api.messageUnreadCount().then((r) => {
+        if (alive && r.ok && typeof r.data === 'number') setUnread(r.data);
+      });
+    };
+    tick();
+    const id = setInterval(tick, 10000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [canInbox]);
+
+  // Cảnh báo bộ nhớ vượt ngưỡng (Storage-Guard): poll mỗi 5 phút → bật dialog xác nhận dọn dẹp.
+  useEffect(() => {
+    if (!canStorage) return;
+    let alive = true;
+    const tick = (): void => {
+      window.api.storageStatus().then((r) => {
+        if (!alive || !r.ok || !r.data) return;
+        setStorageOver(r.data.over ? { pct: r.data.diskUsedPct, threshold: r.data.thresholdPct } : null);
+      });
+    };
+    tick();
+    const id = setInterval(tick, 5 * 60 * 1000);
+    return () => { alive = false; clearInterval(id); };
+  }, [canStorage]);
+
+  // G11: phiên bản hiện tại (hiển thị ở footer sidebar — chỗ "trực quan" user thấy đã lên bản mới).
+  useEffect(() => {
+    window.api.getAppVersion().then((v) => setAppVersion(v));
+    // Sự cố 9/8 (cấm tái diễn): badge nguồn data (API + database) thường trực — lẫn nguồn thấy ngay bằng mắt.
+    Promise.all([window.api.getEffectiveApiBase(), window.api.serverConfigGet()])
+      .then(([api, cfg]) => setSrvInfo({ api: (api || '').replace(/^https?:\/\//, ''), database: cfg?.config?.database ?? '' }))
+      .catch(() => {});
+  }, []);
+
+  const activeItem = visible.find((m) => m.key === active) ?? visible[0];
+  // [Admin Demo 7/11] Màn DOANH SỐ chạy FULL MÀN: vào tab là ẩn thanh menu trái, lấy trọn bề ngang cho bảng
+  // 21 cột. Bấm nút 3 GẠCH trên thanh trên để gọi menu trở lại (không mất đường về).
+  const [anMenu, setAnMenu] = useState(false);
+  const manFull = activeItem?.key === 'doanhso' || activeItem?.key === 'tiencho';
+  useEffect(() => {
+    // [DOANH SỐ TIỀN CHỜ 24/11] Màn tiền chờ nay là CLONE màn Doanh Số (full màn) ⇒ cũng tự ẩn menu trái.
+    setAnMenu(active === 'doanhso' || active === 'tiencho');
+  }, [active]);
+
+  // [DOANH SỐ TIỀN CHỜ 24/11] Nút 3 GẠCH gọi lại menu — DÙNG CHUNG cho cả màn Doanh Số lẫn Doanh số tiền chờ.
+  const nutMenuFull =
+    manFull && anMenu ? (
+      <button
+        type="button"
+        onClick={() => setAnMenu(false)}
+        title="Hiện thanh menu"
+        aria-label="Hiện thanh menu"
+        data-kiem="nut-menu"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[3.4px] border border-line bg-white text-slate-600 shadow-sm transition hover:bg-brand-tint hover:text-brand"
+      >
+        <Menu className="h-[18px] w-[18px]" />
+      </button>
+    ) : undefined;
+
+  return (
+    <div className="flex h-full w-full overflow-hidden bg-appbg">
+      {/* Sidebar — ẩn hẳn khi đang xem màn full (Doanh Số) */}
+      {!anMenu && (
+      <aside className="flex w-64 shrink-0 flex-col bg-sidebar text-sidebar-text">
+        <div className="flex h-14 items-center gap-2 px-5 text-slate-700">
+          <AlphaLogo className="h-9 w-9" />
+          <span className="text-[15px] font-semibold tracking-wide">SigMa</span>
+          {/* [Admin Demo 15/11] "Trang chủ" rời khỏi danh sách menu, lên đây cạnh chữ SigMa. */}
+          {visible.some((m) => m.key === 'dashboard') && (
+            <button
+              type="button"
+              onClick={() => setActive('dashboard')}
+              title="Trang chủ"
+              aria-label="Trang chủ"
+              data-kiem="nut-trang-chu"
+              className={'ml-auto flex h-8 w-8 items-center justify-center rounded-[3.4px] border transition '
+                + (activeItem?.key === 'dashboard'
+                  ? 'border-brand bg-brand-tint text-brand'
+                  : 'border-line bg-white text-slate-600 hover:bg-brand-tint hover:text-brand')}
+            >
+              <LayoutDashboard className="h-[18px] w-[18px]" />
+            </button>
+          )}
+        </div>
+        <nav className="flex flex-1 flex-col gap-1 overflow-y-auto px-3 py-3">
+          {hienTrongNav.map((m) => {
+            const isActive = m.key === activeItem?.key;
+            return (
+              <button
+                key={m.key}
+                onClick={() => setActive(m.key)}
+                data-nut-menu
+                data-chon={isActive ? '1' : '0'}
+                className={
+                  // Admin Demo 8/8 — KHÓA menu sidebar CÙNG kích thước nút Đăng xuất (master): h-11 = 44px (Button md).
+                  // Admin Demo 13/11 — HÌNH DÁNG + MÀU lấy từ mau-moi.css (giống hệt nút "Làm mới"), KHÔNG viết màu
+                  // ở đây nữa: trước kia mục đang chọn nổi 3D kiểu viên thuốc, lạc hẳn với nút thanh công cụ.
+                  'group relative flex h-11 items-center gap-3 text-sm transition-colors duration-150 ' +
+                  (m.indent ? 'pl-8 pr-2.5 ' : 'px-2.5 ') +
+                  (isActive ? 'font-semibold ' : 'font-medium text-sidebar-text')
+                }
+              >
+                {/* Thanh nhấn bên trái khi đang chọn — cùng tông xanh với chữ của nút "Làm mới". */}
+                {isActive && <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 bg-[#2b6ca3]" />}
+                {/* Ô icon nổi bật */}
+                <span
+                  data-o-icon
+                  className={
+                    'flex h-8 w-8 shrink-0 items-center justify-center transition-colors ' +
+                    (isActive ? 'text-[#2b6ca3]' : 'text-slate-500 group-hover:text-brand')
+                  }
+                >
+                  {m.icon}
+                </span>
+                <span className="flex-1 text-left tracking-wide">{m.label}</span>
+                {m.badge === 'undeliveredTid' && undeliveredCount > 0 && (
+                  <span className="rounded-full bg-danger px-1.5 text-xs font-semibold text-white shadow">{undeliveredCount}</span>
+                )}
+                {m.badge === 'pendingCancels' && pendingCancels > 0 && (
+                  <span className="rounded-full bg-danger px-1.5 text-xs font-semibold text-white shadow">{pendingCancels}</span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="px-3 py-3">
+          {/* Admin Demo BẢN ĐỒ VARIANT — Đăng xuất cùng tông ĐỎ với Thu hồi (btn-danger), 1 nguồn design-system. */}
+          <Button variant="danger" data-nut="dangxuat" className="w-full" onClick={() => void confirmLogout()} icon={<LogOut className="h-[18px] w-[18px]" />}>
+            Đăng xuất
+          </Button>
+          {/* Badge nguồn data (sự cố 9/8 — cấm tái diễn lẫn nguồn) */}
+          {srvInfo && (
+            <div className="mt-2 flex flex-col items-center gap-0.5 px-2 text-center text-[10px] text-sidebar-text/60" title={`API ${srvInfo.api} · database ${srvInfo.database}`}>
+              <div className="flex max-w-full items-center gap-1">
+                <span>🌐</span>
+                <span className="truncate font-mono">{srvInfo.api || '(mặc định)'}</span>
+              </div>
+              {srvInfo.database && (
+                <div className="flex items-center gap-1">
+                  <span>🗄</span>
+                  <span className="font-mono font-bold text-brand">{srvInfo.database}</span>
+                </div>
+              )}
+            </div>
+          )}
+          {/* G11: phiên bản hiện tại */}
+          <div className="mt-1 px-3 text-center text-[11px] text-sidebar-text/60">
+            {appVersion ? `Phiên bản v${appVersion}` : ''}
+          </div>
+          {/* [B215] Chỉ bản desktop mới có bộ cập nhật — bản web tải lại trang là có bản mới. */}
+          {coDesktop && (
+            <div className="mt-1 px-3 text-center">
+              <button
+                type="button"
+                data-nut="kiemcapnhat"
+                disabled={dangKiemCapNhat}
+                onClick={() => void kiemCapNhat()}
+                className="rounded-md border border-sidebar-text/25 px-2 py-0.5 text-[11px] text-sidebar-text/75 transition hover:bg-white/10 disabled:opacity-50"
+              >
+                {dangKiemCapNhat ? 'Đang kiểm…' : 'Kiểm tra cập nhật'}
+              </button>
+            </div>
+          )}
+        </div>
+      </aside>
+      )}
+
+      {/* Main column */}
+      <div className="flex flex-1 flex-col overflow-hidden">
+        {/* Topbar — màn FULL thì ẩn hẳn, chỉ chừa nút 3 gạch nổi (Admin Demo 7/11) */}
+        {!(manFull && anMenu) && (
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-line bg-white px-6">
+          <div className="flex items-center gap-4">
+            {/* Nút 3 GẠCH: LUÔN hiện, bấm là ẩn/hiện thanh menu (Admin Demo 7/11). */}
+            <button
+              type="button"
+              onClick={() => setAnMenu((x) => !x)}
+              title={anMenu ? 'Hiện thanh menu' : 'Ẩn thanh menu'}
+              aria-label={anMenu ? 'Hiện thanh menu' : 'Ẩn thanh menu'}
+              data-kiem="nut-menu"
+              className="flex h-9 w-9 items-center justify-center rounded-[3.4px] border border-line bg-white text-slate-600 shadow-sm transition hover:bg-brand-tint hover:text-brand"
+            >
+              <Menu className="h-[18px] w-[18px]" />
+            </button>
+            {/* [Admin Demo 7/11] Bỏ chữ "SigMa /" — logo đã ở góc trái, nhắc lại tên app là thừa chỗ. */}
+            <div className="text-sm font-medium text-slate-700">{activeItem?.label}</div>
+            <TopbarSearch onNavigate={(page, term, kind, id) => { setJump(term ? { page, term, kind, id } : null); setActive(page); }} />
+          </div>
+          <div className="flex items-center gap-2">
+            <TopbarClock />
+            <ScreenshotButton />
+            {canInbox && (
+              <button
+                onClick={() => setShowInbox(true)}
+                title="Hòm thư nội bộ"
+                className="relative flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-appbg hover:text-brand"
+              >
+                <Inbox className="h-[19px] w-[19px]" />
+                {unread > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold leading-none text-white shadow">
+                    {unread > 99 ? '99+' : unread}
+                  </span>
+                )}
+              </button>
+            )}
+          <div className="relative">
+            <button
+              onClick={() => setMenuOpen((o) => !o)}
+              className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-appbg"
+            >
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-tint text-sm font-semibold text-brand">
+                {user.fullName.charAt(0).toUpperCase()}
+              </div>
+              <div className="text-left leading-tight">
+                <div className="text-sm font-medium text-slate-700">{user.fullName}</div>
+                <div className="text-xs text-slate-400">{user.roles.join(', ') || '—'}</div>
+              </div>
+              <ChevronDown className="h-4 w-4 text-slate-400" />
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 z-50 mt-1 w-48 rounded-lg border border-line bg-white py-1 shadow-lg">
+                {/* z-50 (Admin Demo 15/7): trước thiếu z-index → menu bị nội dung phía dưới che. */}
+                <div className="px-3 py-2 text-xs text-slate-400">@{user.username}</div>
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setShowChangePw(true);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-appbg"
+                >
+                  <KeyRound className="h-4 w-4 text-slate-400" /> Đổi mật khẩu
+                </button>
+                {canLevel2 && (
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setShowLevel2(true);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-appbg"
+                  >
+                    <ShieldCheck className="h-4 w-4 text-slate-400" /> Mật khẩu cấp 2
+                  </button>
+                )}
+                <div className="my-1 border-t border-line" />
+                <button
+                  onClick={() => void confirmLogout()}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-danger hover:bg-appbg"
+                >
+                  <LogOut className="h-4 w-4" /> Đăng xuất
+                </button>
+              </div>
+            )}
+          </div>
+          </div>
+        </header>
+        )}
+
+        {/* Content */}
+        {/* data-nut-vuong đặt Ở ĐÂY (12/11): mọi màn chức năng nằm trong <main> nên ĐỀU ăn mẫu nút chốt —
+            không còn cảnh màn nào quên gắn thẻ bọc thì nút lệch brand (đo thật 12/11: 8 màn bị lệch).
+            Đặt ở <main> chứ KHÔNG ở thẻ ngoài cùng, để menu bên trái giữ nguyên kiểu riêng. */}
+        {/* 13/11 — `flex min-h-0 flex-col` cho CẢ 2 chế độ: trang nào đánh dấu `data-trang-full` sẽ
+            chiếm trọn chiều cao và tự cuộn BÊN TRONG khung bảng (1 thanh cuộn), trang chưa đánh dấu
+            vẫn cuộn như cũ nhờ `overflow-auto` ở đây. */}
+        <main data-nut-vuong className={manFull ? 'flex min-h-0 flex-1 flex-col overflow-hidden p-0' : 'flex min-h-0 flex-1 flex-col overflow-auto p-6'}>
+          {/* Admin Demo 15/7 — hiệu ứng 3D nổi khi chuyển menu: key={active} → re-mount + animation pageIn. */}
+          <div
+            key={active + (jump && jump.page === active ? ':' + jump.term : '')}
+            className={manFull ? 'page-enter flex min-h-0 flex-1 flex-col' : 'page-enter flex min-h-0 flex-1 flex-col'}
+          >
+          {activeItem?.key === 'dashboard' && <Home user={user} visibleCount={visible.length} />}
+          {activeItem?.key === 'pos' && <PosPage user={user} initialSearch={jump?.page === 'pos' ? jump.term : undefined} />}
+          {activeItem?.key === 'tid' && <TidPage user={user} initialSearch={jump?.page === 'tid' ? jump.term : undefined} />}
+          {activeItem?.key === 'staff' && <StaffManagementPage user={user} />}
+          {activeItem?.key === 'bankcfg' && <BankConfigPage user={user} />}
+          {activeItem?.key === 'dossier' && <DossierPage user={user} initialSearch={jump?.page === 'dossier' ? jump.term : undefined} />}
+          {activeItem?.key === 'doanhso' && <BillManualEntryPage user={user} nutMenu={nutMenuFull} />}
+          {/* [DOANH SỐ TIỀN CHỜ 24/11 — Admin Demo] CLONE màn Doanh Số, chỉ khác lọc loại phí Tiền chờ(8)/Uỷ quyền(9). */}
+          {activeItem?.key === 'tiencho' && <BillManualEntryPage user={user} nutMenu={nutMenuFull} cheDoTienCho />}
+          {activeItem?.key === 'revdebt' && <DoanhThuVaTaiChinh user={user} initialJump={jump?.page === 'revdebt' ? { kind: jump.kind, id: jump.id, term: jump.term } : undefined} />}
+          {activeItem?.key === 'myinvestor' && <InvestorSelfViewPage />}
+          {activeItem?.key === 'approval' && <ApprovalPage user={user} />}
+          {activeItem?.key === 'exportapproval' && <ExportApprovalPage user={user} />}
+          {activeItem?.key === 'billexplain' && <BillExplainPage user={user} />}
+          {activeItem?.key === 'system' && <SystemConfigPage user={user} />}
+          </div>
+        </main>
+      </div>
+
+      {showInbox && canInbox && (
+        <MessagesDrawer
+          canSend={canSend}
+          onClose={() => setShowInbox(false)}
+          onChanged={() => {
+            window.api.messageUnreadCount().then((r) => {
+              if (r.ok && typeof r.data === 'number') setUnread(r.data);
+            });
+          }}
+        />
+      )}
+      {showChangePw && <ChangePasswordModal onClose={() => setShowChangePw(false)} />}
+      {showLevel2 && <Level2PasswordModal onClose={() => setShowLevel2(false)} />}
+
+      {/* [KẾ TOÁN NĐT 24/11] Banner PHẠM VI — hiện tên NĐT mà tài khoản bị khóa. Fixed top-center z cao để thấy
+          cả trên màn Doanh Số toàn-màn. scopeInvestorName do /v1/auth/me trả (loadAuthUser đọc users.scope_investor_id).
+          Chỉ TRÌNH BÀY — phạm vi thật ép ở backend. */}
+      {user.scopeInvestorName && (
+        <div
+          data-kiem="banner-scope-ndt"
+          className="fixed left-1/2 top-2 z-[60] -translate-x-1/2 rounded-full border border-brand/30 bg-brand-tint px-3 py-1 text-xs font-medium text-brand shadow-sm"
+        >
+          Phạm vi: NĐT {user.scopeInvestorName}
+        </div>
+      )}
+
+      {/* G11: banner cập nhật tích hợp (có bản mới / tải % / thành công / lỗi) */}
+      {/* Màn FULL (Doanh Số) che kín màn hình — hộp "có bản cập nhật" nhảy lên góc phải sẽ ĐÈ lên bảng
+          tiền. Ẩn khi đang full; bấm 3 gạch hiện menu là nó hiện lại (Admin Demo 7/11). */}
+      {!(manFull && anMenu) && <UpdateBanner />}
+
+      {/* Dialog cảnh báo bộ nhớ vượt ngưỡng — CHỈ thứ 2 hàng tuần (Storage-Guard) */}
+      {storageOver && !storageDismissed && canStorage && storageWarnDue() && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <div className="mb-3 flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-danger/10"><HardDrive className="h-6 w-6 text-danger" /></div>
+              <div>
+                <h3 className="text-base font-semibold text-slate-800">Bộ nhớ sắp đầy</h3>
+                <p className="text-xs text-slate-500">Đã dùng {storageOver.pct ?? '—'}% ≥ ngưỡng {storageOver.threshold}%</p>
+              </div>
+            </div>
+            <p className="mb-5 text-sm text-slate-600">Để đảm bảo dữ liệu luôn được lưu và cập nhật, hãy dọn dẹp lịch sử và thùng rác cũ. Hệ thống sẽ tự tạo bản sao lưu an toàn trước khi xóa.</p>
+            <div className="flex justify-end gap-2">
+              <Button variant="soft" onClick={() => { markStorageWarn(); setStorageDismissed(true); }}>Để sau</Button>
+              <Button variant="confirm" onClick={() => { markStorageWarn(); setActive('system'); setStorageDismissed(true); }}>Đi tới Bảo trì</Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Định dạng số nguyên với dấu chấm phân cách hàng nghìn (chuẩn VN) — không dùng toLocaleString. */
+function fmtNum(n: number): string {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+
+function Home({ user }: { user: AuthUser; visibleCount: number }): JSX.Element {
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  // Admin Demo 15/7 — banner "Xin chào" chỉ hiện ~10s khi vào trang chủ rồi tự ẩn (kiểu thông báo push).
+  const [showWelcome, setShowWelcome] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setShowWelcome(false), 10000);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Tải lại thủ công (nút "Làm mới" trang chủ) — bổ sung cho poll 15s realtime.
+  const refresh = (): void => {
+    setLoading(true);
+    // FE-03 (Codex 15/7): IPC reject không được để spinner treo — luôn tắt loading (catch).
+    window.api.dashboardStats().then((r) => { if (r.ok && r.data) setStats(r.data); }).catch(() => undefined).finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    let alive = true;
+    const tick = (): void => {
+      window.api.dashboardStats().then((r) => {
+        if (alive && r.ok && r.data) setStats(r.data);
+      }).catch(() => undefined).finally(() => { if (alive) setLoading(false); });
+    };
+    tick();
+    const id = setInterval(tick, 15000); // realtime nhẹ — poll 15s
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+
+  const c = stats?.counts;
+  const kpis: { label: string; value: number; icon: JSX.Element; tint: string }[] = [
+    { label: 'Tổng TID', value: c?.tids ?? 0, icon: <CreditCard className="h-5 w-5" />, tint: 'bg-brand/10 text-brand' },
+    { label: 'Khách hàng', value: c?.customers ?? 0, icon: <UserRound className="h-5 w-5" />, tint: 'bg-emerald-500/10 text-emerald-600' },
+    { label: 'Máy POS', value: c?.posDevices ?? 0, icon: <HardDrive className="h-5 w-5" />, tint: 'bg-amber-500/10 text-amber-600' },
+    { label: 'Hồ sơ HKD', value: c?.dossiers ?? 0, icon: <FolderKanban className="h-5 w-5" />, tint: 'bg-violet-500/10 text-violet-600' },
+    { label: 'Nhân sự', value: c?.users ?? 0, icon: <Users className="h-5 w-5" />, tint: 'bg-sky-500/10 text-sky-600' },
+    { label: 'Ngân hàng', value: c?.banks ?? 0, icon: <Landmark className="h-5 w-5" />, tint: 'bg-rose-500/10 text-rose-600' },
+    { label: 'NH đang hoạt động', value: c?.banksActive ?? 0, icon: <Landmark className="h-5 w-5" />, tint: 'bg-emerald-500/10 text-emerald-600' },
+    { label: 'NH không hoạt động', value: c?.banksInactive ?? 0, icon: <Landmark className="h-5 w-5" />, tint: 'bg-slate-400/10 text-slate-500' }
+  ];
+
+  return (
+    <div className="space-y-6">
+      {/* Lời chào — nhỏ gọn nền xám, chỉ hiện ~10s khi vào rồi tự ẩn (Admin Demo 15/7). */}
+      {showWelcome && (
+        <div className="page-enter rounded-xl border border-line bg-sidebar px-4 py-2.5 shadow-sm">
+          <h2 className="text-base font-bold text-slate-800">Xin chào {user.fullName} 👋</h2>
+          <p className="text-xs text-slate-500">
+            Tổng quan hệ thống SigMa — vai trò{' '}
+            <span className="font-semibold text-slate-700">{user.roles.join(', ') || 'chưa gán'}</span>. Dữ liệu cập nhật thời gian thực.
+          </p>
+        </div>
+      )}
+
+      {/* R41 — user đang đăng nhập (realtime ~15s). Chỉ vai có quyền xem nhân sự. */}
+      {hasPermission(user, 'USER_READ') && <OnlineUsersPanel />}
+
+      {/* Lợi nhuận accrual tháng (PHASE H2-core) — chỉ hiện với vai có quyền thu-chi */}
+      {hasPermission(user, 'CASHENTRY_VIEW') && <ProfitPanel />}
+
+      {/* KPI realtime */}
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-slate-600">Chỉ số tổng quan (realtime)</h3>
+        <Button data-nut="lammoi" variant="soft" onClick={refresh} title="Tải lại số liệu mới nhất" icon={<RefreshCw className="h-4 w-4" />}>Làm mới</Button>
+      </div>
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+        {kpis.map((k) => (
+          <div key={k.label} className="rounded-xl border border-line bg-white p-4 shadow-sm transition hover:shadow-md">
+            <div className={'mb-3 flex h-10 w-10 items-center justify-center rounded-lg ' + k.tint}>{k.icon}</div>
+            <div className="text-2xl font-bold tabular-nums whitespace-nowrap text-slate-800">
+              {loading ? <span className="text-slate-300">—</span> : fmtNum(k.value)}
+            </div>
+            <div className="mt-0.5 text-xs font-medium text-slate-500">{k.label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* Biểu đồ tăng trưởng */}
+        <div className="rounded-2xl border border-line bg-white p-5 shadow-sm lg:col-span-2">
+          <div className="mb-4 flex items-center gap-2">
+            <TrendingUp className="h-5 w-5 text-brand" />
+            <h3 className="text-base font-semibold text-slate-800">Tăng trưởng 12 tháng</h3>
+            <span className="ml-auto flex items-center gap-3 text-xs text-slate-500">
+              <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-brand" /> TID</span>
+              <span className="flex items-center gap-1"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" /> Khách hàng</span>
+            </span>
+          </div>
+          <GrowthChart data={stats?.monthly ?? []} loading={loading} />
+        </div>
+
+        {/* Bộ đếm tách chiều */}
+        <div className="space-y-6">
+          <BreakdownCard title="TID theo ngân hàng" icon={<CreditCard className="h-4 w-4" />} rows={stats?.tidsByBank ?? []} loading={loading} unit="TID" />
+          <BreakdownCard title="Máy POS theo trạng thái" icon={<BarChart3 className="h-4 w-4" />} rows={stats?.posByStatus ?? []} loading={loading} unit="máy" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** VND cho KpiCard lợi nhuận — nhóm 3 số bằng dấu chấm (R_UI, KHÔNG toLocaleString). Giữ dấu âm. */
+function moneyVnd(n: number): string {
+  const neg = n < 0;
+  const s = Math.abs(Math.round(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return (neg ? '−' : '') + s + 'đ';
+}
+
+/**
+ * PHASE H2-core — Lợi nhuận accrual tháng hiện tại + so tháng trước (§5). ACCRUAL:
+ * Σ doanh thu ghi nhận (Transaction) + Σ CashEntry THU affectsPnl − Σ CashEntry CHI affectsPnl.
+ */
+function ProfitPanel(): JSX.Element | null {
+  const [data, setData] = useState<import('../../../preload/index.d').ProfitStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    const tick = (): void => {
+      window.api.dashboardProfit().then((r) => {
+        if (!alive) return;
+        if (r.ok && r.data) setData(r.data);
+        setLoading(false);
+      });
+    };
+    tick();
+    const id = setInterval(tick, 30000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+
+  const cur = data?.current;
+  const prev = data?.previous;
+  const profit = cur?.profit ?? 0;
+  const prevProfit = prev?.profit ?? 0;
+  const delta = profit - prevProfit;
+  const cards: { label: string; value: number; icon: JSX.Element; tint: string; valueCls?: string }[] = [
+    { label: 'Doanh thu ghi nhận (tháng)', value: cur?.revenueAccrual ?? 0, icon: <TrendingUp className="h-5 w-5" />, tint: 'bg-brand/10 text-brand' },
+    { label: 'Chi phí (tháng)', value: cur?.expense ?? 0, icon: <Coins className="h-5 w-5" />, tint: 'bg-amber-500/10 text-amber-600' },
+    { label: 'Lợi nhuận (accrual)', value: profit, icon: <PiggyBank className="h-5 w-5" />, tint: profit >= 0 ? 'bg-emerald-500/10 text-emerald-600' : 'bg-rose-500/10 text-rose-600', valueCls: profit >= 0 ? 'text-emerald-600' : 'text-rose-600' }
+  ];
+
+  return (
+    <div className="rounded-2xl border border-line bg-white p-5 shadow-sm">
+      <div className="mb-3 flex items-center gap-2">
+        <PiggyBank className="h-5 w-5 text-brand" />
+        <h3 className="text-base font-semibold text-slate-800">Lợi nhuận tháng {cur?.month ?? ''}</h3>
+        {!loading && (
+          <span className={'ml-auto whitespace-nowrap text-xs font-medium ' + (delta >= 0 ? 'text-emerald-600' : 'text-rose-600')}>
+            {delta >= 0 ? '▲' : '▼'} {moneyVnd(Math.abs(delta))} so tháng trước ({moneyVnd(prevProfit)})
+          </span>
+        )}
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {cards.map((k) => (
+          <div key={k.label} className="rounded-xl border border-line bg-white p-4 shadow-sm">
+            <div className={'mb-3 flex h-10 w-10 items-center justify-center rounded-lg ' + k.tint}>{k.icon}</div>
+            <div className={'text-2xl font-bold tabular-nums whitespace-nowrap ' + (k.valueCls ?? 'text-slate-800')}>
+              {loading ? <span className="text-slate-300">—</span> : moneyVnd(k.value)}
+            </div>
+            <div className="mt-0.5 text-xs font-medium text-slate-500">{k.label}</div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-xs text-slate-400">Lợi nhuận theo doanh thu ghi nhận (accrual). Thu công nợ / cọc / tạm ứng / chuyển quỹ KHÔNG tính (chống đếm trùng).</p>
+    </div>
+  );
+}
+
+/** Biểu đồ cột nhóm (TID / Khách hàng) 12 tháng — SVG nội tuyến, empty-state khi chưa có dữ liệu. */
+function GrowthChart({ data, loading }: { data: DashboardStats['monthly']; loading: boolean }): JSX.Element {
+  if (loading) return <div className="flex h-56 items-center justify-center text-slate-300"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+  const max = Math.max(1, ...data.map((d) => Math.max(d.tids, d.customers)));
+  const hasData = data.some((d) => d.tids > 0 || d.customers > 0);
+  const H = 180;
+  const barW = 8;
+  const gap = 6;
+  const groupW = barW * 2 + gap;
+  const slot = 100 / Math.max(1, data.length);
+
+  return (
+    <div className="relative">
+      <div className="flex h-56 items-end gap-0" style={{ minHeight: H }}>
+        {data.map((d) => {
+          const h1 = (d.tids / max) * H;
+          const h2 = (d.customers / max) * H;
+          const mm = d.month.slice(5);
+          return (
+            <div key={d.month} className="flex flex-1 flex-col items-center justify-end gap-1" title={`Tháng ${mm}: ${d.tids} TID · ${d.customers} khách`}>
+              <div className="flex items-end gap-[3px]" style={{ height: H }}>
+                <div className="w-2.5 rounded-t bg-brand transition-all" style={{ height: Math.max(2, h1) }} />
+                <div className="w-2.5 rounded-t bg-emerald-500 transition-all" style={{ height: Math.max(2, h2) }} />
+              </div>
+              <span className="text-[10px] text-slate-400">{mm}</span>
+            </div>
+          );
+        })}
+      </div>
+      {!hasData && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-slate-400">
+          <TrendingUp className="h-8 w-8" />
+          <p className="text-sm">Chưa có dữ liệu tăng trưởng để hiển thị.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Bộ đếm tách theo chiều (vd Tổng TID VPBank…) — empty-state riêng. */
+function BreakdownCard({
+  title,
+  icon,
+  rows,
+  loading,
+  unit
+}: {
+  title: string;
+  icon: JSX.Element;
+  rows: { label: string; count: number }[];
+  loading: boolean;
+  unit: string;
+}): JSX.Element {
+  const max = Math.max(1, ...rows.map((r) => r.count));
+  return (
+    <div className="rounded-2xl border border-line bg-white p-5 shadow-sm">
+      <div className="mb-3 flex items-center gap-2 text-slate-700">
+        <span className="text-brand">{icon}</span>
+        <h3 className="text-sm font-semibold">{title}</h3>
+      </div>
+      {loading ? (
+        <div className="flex h-20 items-center justify-center text-slate-300"><Loader2 className="h-5 w-5 animate-spin" /></div>
+      ) : rows.length === 0 ? (
+        <p className="py-6 text-center text-sm text-slate-400">Chưa có dữ liệu.</p>
+      ) : (
+        <div className="space-y-2.5">
+          {rows.slice(0, 6).map((r) => (
+            <div key={r.label}>
+              <div className="mb-1 flex items-center justify-between text-sm">
+                <span className="font-medium text-slate-600">{r.label}</span>
+                <span className="tabular-nums whitespace-nowrap font-semibold text-slate-800">{fmtNum(r.count)} {unit}</span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-appbg">
+                <div className="h-full rounded-full bg-brand" style={{ width: `${(r.count / max) * 100}%` }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** R41 — Bảng "Đang đăng nhập": bộ đếm + danh sách user online, tự làm mới ~15s. */
+function OnlineUsersPanel(): JSX.Element {
+  const [rows, setRows] = useState<OnlineUserDto[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const load = async (): Promise<void> => {
+      try {
+        const r = await window.api.onlineUsers();
+        if (alive && r.ok && r.data) setRows(r.data);
+      } catch {
+        /* bỏ qua nhịp lỗi */
+      }
+    };
+    void load();
+    const id = setInterval(load, 15000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+  return (
+    <div className="rounded-2xl border border-line bg-white p-5 shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-600">
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+          </span>
+          Đang đăng nhập
+          <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-bold tabular-nums text-emerald-600">{rows.length}</span>
+        </h3>
+        <span className="text-xs text-slate-400">tự cập nhật ~15 giây</span>
+      </div>
+      {rows.length === 0 ? (
+        <div className="py-2 text-sm text-slate-400">Chưa có ai đang đăng nhập.</div>
+      ) : (
+        <ul className="divide-y divide-line">
+          {rows.map((u) => (
+            <li key={u.userId} className="flex items-center justify-between py-2">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand/10 text-xs font-bold text-brand">{(u.fullName || u.username).charAt(0).toUpperCase()}</span>
+                <div>
+                  <div className="text-sm font-medium text-slate-700">{u.fullName || u.username}</div>
+                  <div className="text-xs text-slate-400">@{u.username}{u.deviceInfo ? ` · ${u.deviceInfo}` : ''}</div>
+                </div>
+              </div>
+              <span className="text-xs text-slate-400">từ {new Date(u.since).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,5 @@
+
+# Ban cai that (khong commit)
+public/downloads/*.exe
+public/downloads/*.apk
+dist/

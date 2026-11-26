@@ -1,0 +1,20 @@
+// R200 LEAD render — load SigMa web LIVE (bundle 0.6.57 vừa publish), soi console/CSP error, chụp ảnh.
+import { chromium } from 'playwright';
+const BASE = 'http://127.0.0.1:57903';
+const OUT = 'C:/Users/ADMINI~1/AppData/Local/Temp/claude/C--Users-Administrator/856721ce-5805-477f-a72d-115f7114c8d0/scratchpad/r200-sigma-login.png';
+const errs = [];
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 430, height: 900 } });
+page.on('console', (m) => { if (m.type() === 'error') errs.push('CONSOLE: ' + m.text()); });
+page.on('pageerror', (e) => errs.push('PAGEERROR: ' + e.message));
+page.on('requestfailed', (r) => { const f = r.failure(); if (f && /csp|content security/i.test(f.errorText)) errs.push('CSP: ' + r.url() + ' ' + f.errorText); });
+await page.goto(BASE, { waitUntil: 'networkidle', timeout: 30000 }).catch((e) => errs.push('GOTO: ' + e.message));
+await page.waitForTimeout(1500);
+const title = await page.title().catch(() => '?');
+const bodyLen = (await page.evaluate(() => document.body?.innerText?.length ?? 0).catch(() => 0));
+await page.screenshot({ path: OUT, fullPage: false });
+console.log('title=' + title + ' | bodyTextLen=' + bodyLen);
+console.log('lỗi console/CSP/page: ' + errs.length);
+for (const e of errs.slice(0, 15)) console.log('  ' + e);
+console.log('ảnh: ' + OUT);
+await browser.close();

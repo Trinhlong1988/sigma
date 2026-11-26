@@ -1,0 +1,207 @@
+/* Nunito — font của cổng SmartPay, nạp OFFLINE qua @fontsource (không gọi Google CDN, giống Be Vietnam Pro
+   app đang dùng) để bản EXE/APK không phụ thuộc mạng. */
+@import '@fontsource/nunito/400.css';
+@import '@fontsource/nunito/500.css';
+@import '@fontsource/nunito/600.css';
+@import '@fontsource/nunito/700.css';
+
+/* KHỐI LỌC BÁO-CÓ — SAO Y GIAO DIỆN CỔNG SmartPay (sem.paysmart.com.vn) · Admin Demo chọn phương án B (14/10).
+ *
+ * MỌI con số dưới đây là computed style ĐO THẬT trên trang `management-transaction/list` của cổng SmartPay
+ * (script `apps/bot-api/scripts/_tam-do-css-paysmart.mts`, viewport 1440×900, kết quả lưu
+ * `apps/bot-api/_anh-paysmart/paysmart-css*.json`) — KHÔNG ước lượng bằng mắt, không làm tròn cho đẹp.
+ * Cổng dùng theme Metronic/Keen + font Nunito, nên cỡ chữ lẻ (12.35px) và bo góc lẻ (5.525px) là ĐÚNG BẢN GỐC.
+ *
+ * Số đo gốc:
+ *   nền trang       #FFFFFF · chữ #181C32 · Nunito 13px
+ *   thẻ lọc         padding 26px 29.25px · bề ngang 1380px ở khung nhìn 1440 (lề trang 30px)
+ *   lưới            4 cột (bootstrap row-cols-lg-4), mỗi cột 335.25px, padding ngang 9.75px, row-gap 16.25px
+ *   nhãn            Nunito 13px/500 · #3F4254 · line-height 19.5px · letter-spacing 0.232143px
+ *   ô nhập          nền #FFF · viền 1px solid #E1E3EA · bo 5.525px · cao 34.7969px · padding 7.15px 9.75px
+ *                   · chữ 12.35px · #5E6278
+ *   ô "solid"       (ô ngày trên cổng) nền + viền #F9F9F9 — cùng kích thước
+ *   nút Tìm kiếm    nền #F1FAFF · viền 1px DASHED #009EF7 · chữ #009EF7 12.35px/500 · bo 5.525px
+ *                   · padding 7.15px 16.25px · cách nút sau 16.25px
+ *   nút Clear       nền #FFF8DD · viền 1px DASHED #FFC700 · chữ #FFC700 — cùng kích thước
+ *   nút đặc (Export trên cổng) nền #009EF7 · chữ trắng · padding 8.15px 17.25px · 12.35px/500
+ */
+
+.sp-loc {
+  font-family: 'Nunito', var(--font-sans), system-ui, sans-serif;
+  color: #181c32;
+  font-size: 13px;
+  background: #ffffff;
+  padding: 26px 29.25px;
+  border-radius: 12px;
+  box-shadow: 0 0 20px 0 rgba(76, 87, 125, 0.02);
+}
+
+/* Lưới 4 cột: bản gốc là bootstrap `row-cols-lg-4` + `row-gap-5`; cột tự co ở màn hẹp (2 cột rồi 1 cột) đúng
+   như `row-cols-1 row-cols-md-2 row-cols-lg-4` của cổng. */
+.sp-loc__luoi {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 16.25px;
+  margin: 0 -9.75px;
+}
+.sp-loc__o {
+  flex: 0 0 auto;
+  width: 100%;
+  padding: 0 9.75px;
+}
+@media (min-width: 768px) {
+  .sp-loc__o { width: 50%; }
+}
+@media (min-width: 992px) {
+  .sp-loc__o { width: 25%; }
+}
+
+.sp-loc__nhan {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: #3f4254;
+  line-height: 19.5px;
+  letter-spacing: 0.232143px;
+  margin: 0 0 7.8px;
+}
+
+.sp-loc__nhap,
+.sp-loc__chon {
+  display: block;
+  width: 100%;
+  height: 34.7969px;
+  padding: 7.15px 9.75px;
+  font-family: inherit;
+  font-size: 12.35px;
+  line-height: 1;
+  color: #5e6278;
+  background-color: #ffffff;
+  border: 1px solid #e1e3ea;
+  border-radius: 5.525px;
+  outline: none;
+  transition: border-color .15s ease;
+}
+.sp-loc__nhap::placeholder { color: #a1a5b7; }
+.sp-loc__nhap:focus,
+.sp-loc__chon:focus { border-color: #b5b5c3; }
+
+/* Ô kiểu "solid" của cổng (ô ngày): nền xám nhạt, viền cùng màu nền. */
+.sp-loc__nhap--solid {
+  background-color: #f9f9f9;
+  border-color: #f9f9f9;
+}
+
+/* Select: mũi tên vẽ bằng SVG nền cho giống caret của ng-select trên cổng (xám #a1a5b7, nằm sát phải 9.75px). */
+.sp-loc__chon {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 28px;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23a1a5b7' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9.75px center;
+}
+
+/* Nút đa chọn mã QR: trông như 1 ô nhập, mở panel tích chọn bên dưới (cổng dùng ng-select multiple cao 36px —
+   ở đây giữ đúng khung 34.8px của các ô còn lại để hàng không so le). */
+.sp-loc__chonnhieu {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 34.7969px;
+  padding: 7.15px 9.75px;
+  font-family: inherit;
+  font-size: 12.35px;
+  color: #5e6278;
+  background: #ffffff;
+  border: 1px solid #e1e3ea;
+  border-radius: 5.525px;
+  text-align: left;
+  cursor: pointer;
+}
+.sp-loc__chonnhieu-caret { margin-left: auto; color: #a1a5b7; font-size: 10px; }
+
+.sp-loc__hangnut {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 19.5px;
+}
+.sp-loc__nut {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+  font-size: 12.35px;
+  font-weight: 500;
+  border-radius: 5.525px;
+  padding: 7.15px 16.25px;
+  margin-right: 16.25px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sp-loc__nut:last-child { margin-right: 0; }
+.sp-loc__nut[disabled] { opacity: .55; cursor: not-allowed; }
+
+.sp-loc__nut--tim {
+  background: #f1faff;
+  border: 1px dashed #009ef7;
+  color: #009ef7;
+}
+.sp-loc__nut--clear {
+  background: #fff8dd;
+  border: 1px dashed #ffc700;
+  color: #ffc700;
+}
+/* Nút hành động đặc (giống nút Export của cổng) — dùng cho "Tải lại giao dịch mới nhất". */
+.sp-loc__nut--dac {
+  background: #009ef7;
+  border: 1px solid #009ef7;
+  color: #ffffff;
+  padding: 8.15px 17.25px;
+}
+
+/* Panel tích chọn mã QR (không có trên cổng — giữ đúng ngôn ngữ thị giác: viền #E1E3EA, bo 5.525px, Nunito). */
+.sp-loc__panel {
+  position: absolute;
+  z-index: 30;
+  margin-top: 4px;
+  width: 320px;
+  max-height: 320px;
+  overflow: auto;
+  background: #ffffff;
+  border: 1px solid #e1e3ea;
+  border-radius: 5.525px;
+  box-shadow: 0 10px 30px rgba(76, 87, 125, 0.12);
+  padding: 8px;
+  font-size: 12.35px;
+  color: #5e6278;
+}
+.sp-loc__panel-hang {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.sp-loc__panel-hang:hover { background: #f1faff; }
+.sp-loc__panel-dau {
+  display: flex;
+  gap: 8px;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid #e1e3ea;
+}
+.sp-loc__panel-nut {
+  background: none;
+  border: 0;
+  padding: 2px 6px;
+  font: inherit;
+  font-weight: 700;
+  color: #009ef7;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.sp-loc__panel-nut--xam { color: #7e8299; }

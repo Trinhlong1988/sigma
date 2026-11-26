@@ -1,0 +1,31 @@
+{
+  "afterOpen": {
+    "tMs": 2651,
+    "children": 50
+  },
+  "afterLoadAll": {
+    "children": 400,
+    "scrollHeight": 34797,
+    "clientHeight": 633,
+    "totalDomNodes": 6104
+  },
+  "scroll_full400": {
+    "frames": 227,
+    "totalMs": 3006,
+    "fps": 75.5,
+    "p95GapMs": 13.4,
+    "maxGapMs": 13.5,
+    "jankFrames": 0,
+    "longtasks": 0,
+    "longtaskMaxMs": 0,
+    "longtaskSumMs": 0
+  },
+  "typing_full": {
+    "count": 58,
+    "medianMs": 26.6,
+    "p95Ms": 27.3,
+    "maxMs": 27.6,
+    "longtasks": 0,
+    "longtaskMaxMs": 0
+  }
+}

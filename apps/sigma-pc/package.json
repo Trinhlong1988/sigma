@@ -1,0 +1,24 @@
+{
+  "name": "@sigma/sigma-pc",
+  "productName": "SigMa",
+  "version": "0.6.199",
+  "private": true,
+  "description": "SigMa PC (Windows) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â vÃƒÆ’Ã‚Â¡Ãƒâ€šÃ‚Â»Ãƒâ€šÃ‚Â Electron bÃƒÆ’Ã‚Â¡Ãƒâ€šÃ‚Â»Ãƒâ€šÃ‚Âc web app chat SigMa (apps/web-demo). KHÃƒÆ’Ã†â€™Ãƒâ€šÃ‚ÂC apps/desktop (QuÃƒÆ’Ã‚Â¡Ãƒâ€šÃ‚ÂºÃƒâ€šÃ‚Â£n LÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â½ SigMa).",
+  "main": "src/main.js",
+  "author": "sigma",
+  "scripts": {
+    "bundle:web": "node scripts/bundle-web.mjs",
+    "start": "electron .",
+    "prestart": "node scripts/ensure-renderer.mjs",
+    "dist": "electron-builder --win --config electron-builder.yml",
+    "predist": "node scripts/bundle-web.mjs",
+    "pack": "electron-builder --win --dir --config electron-builder.yml"
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
+  },
+  "devDependencies": {
+    "electron": "33.4.11",
+    "electron-builder": "^26.0.0"
+  }
+}

@@ -1,0 +1,342 @@
+// Permission matrix (IMS_SPEC §13). ALWAYS check by permission code, never by role name.
+import type { AuthUser } from './types.js';
+
+export interface PermissionDef {
+  code: string;
+  name: string;
+  group: string;
+}
+
+export const PERMISSIONS: PermissionDef[] = [
+  { code: 'DASHBOARD_VIEW', name: 'Xem Dashboard', group: 'DASHBOARD' },
+  { code: 'USER_CREATE', name: 'Tạo user', group: 'USER' },
+  { code: 'USER_CREATE_LIMITED', name: 'Tạo user giới hạn', group: 'USER' },
+  { code: 'USER_READ', name: 'Xem user', group: 'USER' },
+  { code: 'USER_UPDATE', name: 'Sửa user', group: 'USER' },
+  { code: 'USER_DELETE', name: 'Xóa user', group: 'USER' },
+  { code: 'USER_LOCK', name: 'Khóa user', group: 'USER' },
+  { code: 'USER_UNLOCK', name: 'Mở khóa user', group: 'USER' },
+  { code: 'ROLE_CREATE', name: 'Tạo vai trò', group: 'ROLE' },
+  { code: 'ROLE_READ', name: 'Xem vai trò', group: 'ROLE' },
+  { code: 'ROLE_UPDATE', name: 'Sửa vai trò', group: 'ROLE' },
+  { code: 'ROLE_DELETE', name: 'Xóa vai trò', group: 'ROLE' },
+  { code: 'ROLE_LOCK', name: 'Khóa vai trò', group: 'ROLE' },
+  { code: 'ROLE_UNLOCK', name: 'Mở khóa vai trò', group: 'ROLE' },
+  { code: 'ROLE_ASSIGN', name: 'Gán quyền cho vai trò', group: 'ROLE' },
+  { code: 'AUDIT_LOG_VIEW', name: 'Xem nhật ký hệ thống', group: 'AUDIT' },
+  { code: 'BACKUP_CREATE', name: 'Tạo backup', group: 'BACKUP' },
+  { code: 'BACKUP_RESTORE', name: 'Restore backup', group: 'BACKUP' },
+  { code: 'SYSTEM_SETTING_VIEW', name: 'Xem cấu hình', group: 'SYSTEM' },
+  { code: 'SYSTEM_SETTING_UPDATE', name: 'Sửa cấu hình', group: 'SYSTEM' },
+  // ── G-POS.1 (§A/§D) ──
+  { code: 'CUSTOMER_VIEW', name: 'Xem khách hàng', group: 'CUSTOMER' },
+  { code: 'CUSTOMER_CREATE', name: 'Tạo khách hàng', group: 'CUSTOMER' },
+  { code: 'CUSTOMER_UPDATE', name: 'Sửa khách hàng', group: 'CUSTOMER' },
+  { code: 'CUSTOMER_DELETE', name: 'Xóa khách hàng', group: 'CUSTOMER' },
+  // Nhà đầu tư (Admin Demo 9/8) — CRUD danh mục nhà đầu tư (tab trong Quản Lý Nhân Sự).
+  { code: 'INVESTOR_VIEW', name: 'Xem nhà đầu tư', group: 'INVESTOR' },
+  { code: 'INVESTOR_CREATE', name: 'Tạo nhà đầu tư', group: 'INVESTOR' },
+  { code: 'INVESTOR_UPDATE', name: 'Sửa nhà đầu tư', group: 'INVESTOR' },
+  { code: 'INVESTOR_DELETE', name: 'Xóa nhà đầu tư', group: 'INVESTOR' },
+  // Phase D — quyền cho user NĐT: đăng nhập CHỈ xem báo cáo/tất toán đầu tư CỦA MÌNH (data-scope ép về NĐT gắn userId)
+  // + xuất file. KHÔNG grant cho MANAGER/staff (đó là REVENUE_VIEW/INVESTOR_VIEW). Xem investor-scope.ts.
+  { code: 'INVESTOR_SELF_VIEW', name: 'Xem báo cáo đầu tư của mình', group: 'INVESTOR' },
+  // Tài khoản CON của NĐT (Admin Demo 12/8) — tạo/khóa/xóa "tài khoản xem" R_INVESTOR gắn 1 NĐT để chia sẻ quyền
+  // xem báo cáo CỦA NĐT đó. Gán ADMIN (auto qua [...PERMISSION_CODES]) + MANAGER. NĐT chủ (Investor.userId) tự
+  // quản tài khoản con của MÌNH KHÔNG cần quyền này (service gate theo Investor.userId=ctx.user.id).
+  { code: 'INVESTOR_SUBUSER_MANAGE', name: 'Quản lý tài khoản xem của nhà đầu tư', group: 'INVESTOR' },
+  { code: 'POS_VIEW', name: 'Xem máy POS', group: 'POS' },
+  { code: 'POS_MANAGE', name: 'Quản lý máy POS (tạo/luân chuyển/sửa chữa)', group: 'POS' },
+  { code: 'TID_VIEW', name: 'Xem TID', group: 'TID' },
+  { code: 'TID_MANAGE', name: 'Quản lý TID (gán/đổi/thu hồi/giao)', group: 'TID' },
+  { code: 'ASSET_EXPORT', name: 'Xuất dữ liệu tài sản POS/TID', group: 'POS' },
+  // ── G-CFG.1 (§C1–C4) — Cấu hình ngân hàng ──
+  { code: 'CONFIG_BANK_VIEW', name: 'Xem cấu hình ngân hàng', group: 'Cấu hình ngân hàng' },
+  { code: 'CONFIG_BANK_MANAGE', name: 'Quản lý cấu hình ngân hàng (ngân hàng/loại thẻ/đối tác)', group: 'Cấu hình ngân hàng' },
+  // ── G-CFG.2 (§C6–C8) — Cấu hình chuỗi cung ứng máy POS ──
+  { code: 'CONFIG_POS_SUPPLY_VIEW', name: 'Xem cấu hình cung ứng POS (NCC/chủng loại/nhập kho)', group: 'Cấu hình máy POS' },
+  { code: 'CONFIG_POS_SUPPLY_MANAGE', name: 'Quản lý cung ứng POS (NCC/chủng loại/nhập kho)', group: 'Cấu hình máy POS' },
+  // ── G-CFG.3 (§C5) — Cấu hình phí ──
+  { code: 'CONFIG_FEE_VIEW', name: 'Xem cấu hình phí (loại phí/biểu phí)', group: 'Cấu hình phí' },
+  { code: 'CONFIG_FEE_MANAGE', name: 'Quản lý cấu hình phí (loại phí/biểu phí)', group: 'Cấu hình phí' },
+  // ── LOẠI GIAO MÁY (Admin Demo) — danh mục hình thức giao (Bán/Cho thuê/Mượn/Cọc) ──
+  { code: 'CONFIG_HANDOVER_VIEW', name: 'Xem loại giao máy (Bán/Cho thuê/Mượn/Cọc)', group: 'Loại giao máy' },
+  { code: 'CONFIG_HANDOVER_MANAGE', name: 'Quản lý loại giao máy (thêm/sửa/xóa)', group: 'Loại giao máy' },
+  // ── G-CFG.4 (§8) — Tài khoản nhận tiền – ủy quyền ──
+  { code: 'CONFIG_RCV_ACCT_VIEW', name: 'Xem tài khoản nhận tiền – ủy quyền', group: 'Tài khoản nhận tiền' },
+  { code: 'CONFIG_RCV_ACCT_MANAGE', name: 'Quản lý tài khoản nhận tiền – ủy quyền', group: 'Tài khoản nhận tiền' },
+  // ── G-CFG.5 (§10) — Quản lý Hồ sơ HKD ──
+  { code: 'CONFIG_DOSSIER_VIEW', name: 'Xem hồ sơ HKD (nguồn hồ sơ + hồ sơ)', group: 'Hồ sơ HKD' },
+  { code: 'CONFIG_DOSSIER_MANAGE', name: 'Quản lý hồ sơ HKD (nguồn hồ sơ + hồ sơ)', group: 'Hồ sơ HKD' },
+  // ── G-CFG.6 (§9) — Cấu hình TID ──
+  { code: 'CONFIG_TID_VIEW', name: 'Xem cấu hình TID (trạng thái + TID)', group: 'Cấu hình TID' },
+  { code: 'CONFIG_TID_MANAGE', name: 'Quản lý cấu hình TID (trạng thái + TID)', group: 'Cấu hình TID' },
+  // ── R27 (§C kho) — Danh mục Kho ──
+  { code: 'CONFIG_WAREHOUSE_VIEW', name: 'Xem danh mục kho', group: 'Danh mục kho' },
+  { code: 'CONFIG_WAREHOUSE_MANAGE', name: 'Quản lý danh mục kho (thêm/sửa/xóa)', group: 'Danh mục kho' },
+  // ── G-CFG.7 (§11 Pha I1) — Cấu hình ngành nghề (master) ──
+  { code: 'CONFIG_INDUSTRY_VIEW', name: 'Xem cấu hình ngành nghề', group: 'Cấu hình ngành nghề' },
+  { code: 'CONFIG_INDUSTRY_CREATE', name: 'Tạo ngành nghề', group: 'Cấu hình ngành nghề' },
+  { code: 'CONFIG_INDUSTRY_UPDATE', name: 'Sửa ngành nghề', group: 'Cấu hình ngành nghề' },
+  { code: 'CONFIG_INDUSTRY_DELETE', name: 'Xóa ngành nghề', group: 'Cấu hình ngành nghề' },
+  // ── PHASE H1 (§A/§B) — Thu – Chi: danh mục thu/chi ──
+  { code: 'CASHCAT_VIEW', name: 'Xem danh mục thu – chi', group: 'Thu – Chi' },
+  { code: 'CASHCAT_CREATE', name: 'Tạo danh mục thu – chi', group: 'Thu – Chi' },
+  { code: 'CASHCAT_UPDATE', name: 'Sửa danh mục thu – chi', group: 'Thu – Chi' },
+  { code: 'CASHCAT_DELETE', name: 'Xóa danh mục thu – chi', group: 'Thu – Chi' },
+  // ── PHASE H2-core (§J/§D/§E) — Quỹ + Phiếu thu/chi ──
+  { code: 'FUND_VIEW', name: 'Xem quỹ & số dư', group: 'Thu – Chi' },
+  { code: 'FUND_CREATE', name: 'Tạo quỹ', group: 'Thu – Chi' },
+  { code: 'FUND_UPDATE', name: 'Sửa quỹ', group: 'Thu – Chi' },
+  { code: 'FUND_DELETE', name: 'Xóa quỹ', group: 'Thu – Chi' },
+  { code: 'CASHENTRY_VIEW', name: 'Xem phiếu thu – chi & báo cáo dòng tiền', group: 'Thu – Chi' },
+  { code: 'CASHENTRY_CREATE', name: 'Lập phiếu thu / phiếu chi', group: 'Thu – Chi' },
+  { code: 'CASHENTRY_CANCEL', name: 'Hủy phiếu thu – chi', group: 'Thu – Chi' },
+  // ── Thùng rác (R_TRASH_RESTORE) ──
+  { code: 'TRASH_VIEW', name: 'Xem thùng rác (của mình)', group: 'Thùng rác' },
+  { code: 'TRASH_VIEW_ALL', name: 'Xem thùng rác TỔNG (mọi người dùng)', group: 'Thùng rác' },
+  { code: 'TRASH_RESTORE', name: 'Phục hồi dữ liệu đã xóa', group: 'Thùng rác' },
+  { code: 'TRASH_PURGE', name: 'Xóa vĩnh viễn / dọn sạch thùng rác', group: 'Thùng rác' },
+  // ── Nhóm A — Bảo mật & tài khoản ──
+  { code: 'USER_RESET_PASSWORD', name: 'Đặt lại mật khẩu cho user khác', group: 'USER' },
+  { code: 'LEVEL2_MANAGE', name: 'Đặt / đổi mật khẩu cấp 2 (xóa vĩnh viễn)', group: 'Bảo mật' },
+  // ── Nhóm C — Hòm thư nội bộ ──
+  { code: 'MESSAGE_VIEW', name: 'Xem hòm thư (thư & thông báo của mình)', group: 'Hòm thư' },
+  { code: 'MESSAGE_SEND', name: 'Gửi thư nội bộ cho người dùng khác', group: 'Hòm thư' },
+  // ── Nhóm B — Doanh thu & Công nợ ──
+  { code: 'REVENUE_VIEW', name: 'Xem doanh thu & giao dịch', group: 'Doanh thu & Công nợ' },
+  { code: 'REVENUE_MANAGE', name: 'Ghi nhận / sửa / xóa giao dịch doanh thu', group: 'Doanh thu & Công nợ' },
+  { code: 'DEBT_VIEW', name: 'Xem công nợ thu về', group: 'Doanh thu & Công nợ' },
+  { code: 'DEBT_SETTLE', name: 'Đối soát / đánh dấu đã thu công nợ', group: 'Doanh thu & Công nợ' },
+  // ── PHASE H2b — Phân loại chất lượng công nợ + Ghi giảm nợ xấu ──
+  { code: 'DEBT_CLASSIFY', name: 'Phân loại chất lượng công nợ (Dễ / Khó / Không thu hồi)', group: 'Doanh thu & Công nợ' },
+  { code: 'DEBT_WRITEOFF', name: 'Ghi giảm nợ xấu (write-off — trừ thẳng lợi nhuận)', group: 'Doanh thu & Công nợ' },
+  // ── P1.2 — Duyệt hủy bill (chứng từ bất biến) ──
+  { code: 'BILL_CANCEL_REQUEST', name: 'Tạo yêu cầu hủy bill (kèm lý do)', group: 'Doanh thu & Công nợ' },
+  { code: 'BILL_CANCEL_APPROVE', name: 'Duyệt / từ chối yêu cầu hủy bill', group: 'Doanh thu & Công nợ' },
+  { code: 'BILL_CANCEL_APPROVE_ELEVATED', name: 'Duyệt yêu cầu hủy bill do Quản lý/Admin tạo (cấp Admin)', group: 'Doanh thu & Công nợ' },
+  // ── R34 (Admin Demo 11/7) — Duyệt hủy (XÓA qua duyệt) cho TID / POS / Khách hàng / Nhân sự ──
+  // "Hủy" = xóa mềm khỏi hệ thống, BẮT BUỘC qua duyệt (người yêu cầu ≠ người duyệt). APPROVE gán
+  // ADMIN + MANAGER; ELEVATED (duyệt yêu cầu do Quản lý/Admin tạo) chỉ ADMIN. Mật khẩu nhập lúc DUYỆT.
+  { code: 'TID_CANCEL_REQUEST', name: 'Tạo yêu cầu hủy (xóa) TID', group: 'TID' },
+  { code: 'TID_CANCEL_APPROVE', name: 'Duyệt / từ chối yêu cầu hủy TID', group: 'TID' },
+  { code: 'TID_CANCEL_APPROVE_ELEVATED', name: 'Duyệt yêu cầu hủy TID do Quản lý/Admin tạo (cấp Admin)', group: 'TID' },
+  { code: 'POS_CANCEL_REQUEST', name: 'Tạo yêu cầu hủy (xóa) máy POS', group: 'POS' },
+  { code: 'POS_CANCEL_APPROVE', name: 'Duyệt / từ chối yêu cầu hủy máy POS', group: 'POS' },
+  { code: 'POS_CANCEL_APPROVE_ELEVATED', name: 'Duyệt yêu cầu hủy POS do Quản lý/Admin tạo (cấp Admin)', group: 'POS' },
+  { code: 'CUSTOMER_CANCEL_REQUEST', name: 'Tạo yêu cầu hủy (xóa) khách hàng', group: 'CUSTOMER' },
+  { code: 'CUSTOMER_CANCEL_APPROVE', name: 'Duyệt / từ chối yêu cầu hủy khách hàng', group: 'CUSTOMER' },
+  { code: 'CUSTOMER_CANCEL_APPROVE_ELEVATED', name: 'Duyệt yêu cầu hủy khách hàng do Quản lý/Admin tạo (cấp Admin)', group: 'CUSTOMER' },
+  { code: 'USER_CANCEL_REQUEST', name: 'Tạo yêu cầu hủy (xóa) nhân sự', group: 'USER' },
+  { code: 'USER_CANCEL_APPROVE', name: 'Duyệt / từ chối yêu cầu hủy nhân sự', group: 'USER' },
+  { code: 'USER_CANCEL_APPROVE_ELEVATED', name: 'Duyệt yêu cầu hủy nhân sự do Quản lý/Admin tạo (cấp Admin)', group: 'USER' },
+  // ── #3 (Admin Demo 12/7) — Bán máy/TID + công nợ mua thiết bị (đúng vai trò: hành động tiền) ──
+  { code: 'DEVICE_SALE_VIEW', name: 'Xem bán thiết bị & công nợ mua thiết bị', group: 'Doanh thu & Công nợ' },
+  { code: 'DEVICE_SALE_MANAGE', name: 'Bán máy/TID + thu nợ mua thiết bị', group: 'Doanh thu & Công nợ' },
+  // ── PHASE 1 (Admin Demo 13/7) — Yêu cầu xuất kho POS/TID → Duyệt → đối trừ tồn kho ──
+  // User thường TẠO yêu cầu (chưa seri); người có quyền Kho DUYỆT + chọn seri/TID cụ thể lúc duyệt
+  // (tiền + tồn kho trừ LÚC DUYỆT). APPROVE gán ADMIN/MANAGER/WAREHOUSE; VIEW/CREATE cho mọi role vận hành.
+  { code: 'EXPORT_REQUEST_VIEW', name: 'Xem yêu cầu xuất kho POS/TID', group: 'Yêu cầu xuất kho' },
+  { code: 'EXPORT_REQUEST_CREATE', name: 'Tạo yêu cầu xuất kho POS/TID', group: 'Yêu cầu xuất kho' },
+  { code: 'EXPORT_REQUEST_APPROVE', name: 'Duyệt / từ chối yêu cầu xuất kho (chọn seri/TID + trừ tồn kho)', group: 'Yêu cầu xuất kho' },
+  // ELEVATED = TỰ duyệt yêu cầu do CHÍNH mình tạo (chốt bằng mật khẩu). CHỈ ADMIN (auto qua [...PERMISSION_CODES]);
+  // MANAGER/WAREHOUSE có APPROVE thường nhưng KHÔNG có ELEVATED → không tự duyệt phiếu của mình (phân vai tạo≠duyệt).
+  { code: 'EXPORT_REQUEST_APPROVE_ELEVATED', name: 'Tự duyệt yêu cầu xuất kho của chính mình (chốt bằng mật khẩu)', group: 'Yêu cầu xuất kho' },
+  // ── Nhóm E — Bảo trì & Bộ nhớ (chống tràn, dọn dẹp, backup định kỳ) ──
+  { code: 'STORAGE_VIEW', name: 'Xem tình trạng bộ nhớ & bảo trì', group: 'Bảo trì hệ thống' },
+  { code: 'STORAGE_CLEANUP', name: 'Dọn dẹp bộ nhớ (lịch sử + thùng rác) & backup thủ công', group: 'Bảo trì hệ thống' },
+  // ── Bill giải trình (Admin Demo 16/7) — sinh hóa đơn giải trình số tiền + thư viện sản phẩm theo ngành ──
+  { code: 'BILLEXPLAIN_VIEW', name: 'Xem Bill giải trình (theo dõi + thư viện sản phẩm)', group: 'Bill giải trình' },
+  { code: 'BILLEXPLAIN_CREATE', name: 'Sinh bill giải trình + xuất file', group: 'Bill giải trình' },
+  { code: 'BILLEXPLAIN_DELETE', name: 'Xóa bill giải trình đã sinh (theo dõi)', group: 'Bill giải trình' },
+  { code: 'PRODUCT_MANAGE', name: 'Quản lý thư viện sản phẩm (thêm/sửa/xóa/import)', group: 'Bill giải trình' }
+];
+
+export const PERMISSION_CODES = PERMISSIONS.map((p) => p.code);
+
+/**
+ * Default role → permission map (IMS_SPEC §7/§12/§13).
+ * ADMIN = every permission. MANAGER = limited user creation, no ROLE admin / no USER_CREATE full.
+ * Other roles get no administrative permissions in G1 (module perms come later).
+ */
+export const DEFAULT_ROLE_PERMISSIONS: Record<string, string[]> = {
+  ADMIN: [...PERMISSION_CODES],
+  MANAGER: [
+    'DASHBOARD_VIEW',
+    'USER_CREATE_LIMITED',
+    'USER_READ',
+    'USER_UPDATE',
+    'USER_LOCK',
+    'USER_UNLOCK',
+    'ROLE_READ',
+    // G-POS: managers run the customer book and can read POS/TID (not mutate).
+    'CUSTOMER_VIEW',
+    'CUSTOMER_CREATE',
+    'CUSTOMER_UPDATE',
+    'CUSTOMER_DELETE',
+    'INVESTOR_VIEW',
+    'INVESTOR_CREATE',
+    'INVESTOR_UPDATE',
+    'INVESTOR_DELETE',
+    // Tài khoản CON của NĐT (Admin Demo 12/8): manager quản lý "tài khoản xem" cho mọi NĐT.
+    'INVESTOR_SUBUSER_MANAGE',
+    'POS_VIEW',
+    'TID_VIEW',
+    // G-CFG.1: managers cấu hình ngân hàng/loại thẻ/đối tác.
+    'CONFIG_BANK_VIEW',
+    'CONFIG_BANK_MANAGE',
+    // G-CFG.2: managers cấu hình cung ứng POS.
+    'CONFIG_POS_SUPPLY_VIEW',
+    'CONFIG_POS_SUPPLY_MANAGE',
+    // G-CFG.3: managers cấu hình phí.
+    'CONFIG_FEE_VIEW',
+    'CONFIG_FEE_MANAGE',
+    // LOẠI GIAO MÁY: managers cấu hình loại giao (như cấu hình loại phí).
+    'CONFIG_HANDOVER_VIEW',
+    'CONFIG_HANDOVER_MANAGE',
+    // G-CFG.4: managers quản lý TK nhận tiền.
+    'CONFIG_RCV_ACCT_VIEW',
+    'CONFIG_RCV_ACCT_MANAGE',
+    // G-CFG.5: managers quản lý hồ sơ HKD.
+    'CONFIG_DOSSIER_VIEW',
+    'CONFIG_DOSSIER_MANAGE',
+    // G-CFG.6: managers quản lý cấu hình TID.
+    'CONFIG_TID_VIEW',
+    'CONFIG_TID_MANAGE',
+    // G-CFG.7: managers quản lý cấu hình ngành nghề (§11 Pha I1).
+    'CONFIG_INDUSTRY_VIEW',
+    'CONFIG_INDUSTRY_CREATE',
+    'CONFIG_INDUSTRY_UPDATE',
+    'CONFIG_INDUSTRY_DELETE',
+    // R27: managers quản lý danh mục kho.
+    'CONFIG_WAREHOUSE_VIEW',
+    'CONFIG_WAREHOUSE_MANAGE',
+    // PHASE H1: managers quản lý danh mục thu – chi.
+    'CASHCAT_VIEW',
+    'CASHCAT_CREATE',
+    'CASHCAT_UPDATE',
+    'CASHCAT_DELETE',
+    // PHASE H2-core: managers quản lý quỹ + phiếu thu/chi.
+    'FUND_VIEW',
+    'FUND_CREATE',
+    'FUND_UPDATE',
+    'FUND_DELETE',
+    'CASHENTRY_VIEW',
+    'CASHENTRY_CREATE',
+    'CASHENTRY_CANCEL',
+    // Nhóm A: managers đặt lại mật khẩu, đặt pass cấp 2, xem & dọn thùng rác tổng.
+    'USER_RESET_PASSWORD',
+    'LEVEL2_MANAGE',
+    'TRASH_VIEW',
+    'TRASH_VIEW_ALL',
+    'TRASH_PURGE',
+    // Nhóm B: managers xem/ghi nhận doanh thu, theo dõi & đối soát công nợ.
+    'REVENUE_VIEW',
+    'REVENUE_MANAGE',
+    'DEBT_VIEW',
+    'DEBT_SETTLE',
+    // #3: managers bán máy/TID + thu nợ mua thiết bị.
+    'DEVICE_SALE_VIEW',
+    'DEVICE_SALE_MANAGE',
+    // PHASE H2b: managers phân loại chất lượng công nợ + ghi giảm nợ xấu (quyền cao).
+    'DEBT_CLASSIFY',
+    'DEBT_WRITEOFF',
+    // P1.2: managers tạo yêu cầu hủy + duyệt hủy bill (KHÔNG có ELEVATED — cấp Admin mới duyệt yêu cầu của Manager/Admin).
+    'BILL_CANCEL_REQUEST',
+    'BILL_CANCEL_APPROVE',
+    // R34: managers = người duyệt hủy chính (Admin Demo "admin và manager mới có quyền duyệt") + được tạo yêu cầu.
+    // KHÔNG có *_ELEVATED (chỉ Admin duyệt yêu cầu do Quản lý/Admin tạo).
+    'TID_CANCEL_REQUEST',
+    'TID_CANCEL_APPROVE',
+    'POS_CANCEL_REQUEST',
+    'POS_CANCEL_APPROVE',
+    'CUSTOMER_CANCEL_REQUEST',
+    'CUSTOMER_CANCEL_APPROVE',
+    'USER_CANCEL_REQUEST',
+    'USER_CANCEL_APPROVE',
+    // Nhóm E: managers xem tình trạng bộ nhớ & dọn dẹp bảo trì.
+    'STORAGE_VIEW',
+    'STORAGE_CLEANUP',
+    // PHASE 1: managers = người duyệt yêu cầu xuất kho (VIEW/CREATE cấp qua vòng lặp chung bên dưới).
+    'EXPORT_REQUEST_APPROVE',
+    // Bill giải trình (Admin Demo 16/7): managers sinh bill + quản lý thư viện sản phẩm.
+    'BILLEXPLAIN_VIEW',
+    'BILLEXPLAIN_CREATE',
+    'BILLEXPLAIN_DELETE',
+    'PRODUCT_MANAGE'
+  ],
+  D_MANAGER: ['DASHBOARD_VIEW', 'USER_READ', 'ROLE_READ', 'CUSTOMER_VIEW', 'POS_VIEW', 'TID_VIEW', 'CONFIG_BANK_VIEW', 'CONFIG_WAREHOUSE_VIEW', 'CONFIG_HANDOVER_VIEW', 'DEVICE_SALE_VIEW'],
+  ACCOUNTANT: ['DASHBOARD_VIEW', 'CUSTOMER_VIEW', 'CONFIG_BANK_VIEW', 'CONFIG_FEE_VIEW', 'CONFIG_FEE_MANAGE', 'CONFIG_HANDOVER_VIEW', 'CONFIG_RCV_ACCT_VIEW', 'CONFIG_RCV_ACCT_MANAGE', 'CONFIG_DOSSIER_VIEW', 'CONFIG_DOSSIER_MANAGE', 'REVENUE_VIEW', 'REVENUE_MANAGE', 'DEBT_VIEW', 'DEBT_SETTLE', 'DEBT_CLASSIFY', 'BILL_CANCEL_REQUEST',
+    // #3: kế toán = vai tiền chính → bán máy/TID + thu nợ mua thiết bị.
+    'DEVICE_SALE_VIEW', 'DEVICE_SALE_MANAGE',
+    // PHASE H2-core: kế toán = vai chính thu-chi (quỹ + phiếu thu/chi + báo cáo dòng tiền).
+    'FUND_VIEW', 'FUND_CREATE', 'FUND_UPDATE', 'FUND_DELETE', 'CASHENTRY_VIEW', 'CASHENTRY_CREATE', 'CASHENTRY_CANCEL',
+    // Bill giải trình (Admin Demo 16/7): kế toán = vai chính giải trình số tiền → sinh bill + thư viện SP.
+    'BILLEXPLAIN_VIEW', 'BILLEXPLAIN_CREATE', 'BILLEXPLAIN_DELETE', 'PRODUCT_MANAGE'],
+  TECHNICIAN: ['DASHBOARD_VIEW', 'POS_VIEW'],
+  SUPPORT: ['DASHBOARD_VIEW', 'CUSTOMER_VIEW'],
+  WAREHOUSE: ['DASHBOARD_VIEW', 'POS_VIEW', 'TID_VIEW', 'CONFIG_POS_SUPPLY_VIEW', 'CONFIG_POS_SUPPLY_MANAGE', 'CONFIG_TID_VIEW', 'CONFIG_TID_MANAGE',
+    // R27: kho vận quản lý danh mục kho.
+    'CONFIG_WAREHOUSE_VIEW', 'CONFIG_WAREHOUSE_MANAGE',
+    // LOẠI GIAO MÁY: kho vận XEM loại giao (để chọn khi giao máy/TID).
+    'CONFIG_HANDOVER_VIEW',
+    // #3: kho vận CHỈ XEM bán thiết bị (bán = vai tiền, không cho kho tự bán).
+    'DEVICE_SALE_VIEW',
+    // R34: kho vận hành TID/POS → được TẠO yêu cầu hủy (duyệt vẫn do Admin/Manager).
+    'TID_CANCEL_REQUEST', 'POS_CANCEL_REQUEST',
+    // PHASE 1: kho vận = người DUYỆT yêu cầu xuất kho (chọn seri/TID + trừ tồn). VIEW/CREATE cấp qua vòng lặp chung.
+    'EXPORT_REQUEST_APPROVE'],
+  SALES: ['DASHBOARD_VIEW', 'CUSTOMER_VIEW', 'CUSTOMER_CREATE'],
+  CUSTOMER: [],
+  // Phase D — Nhà đầu tư (user NĐT login xem báo cáo CỦA MÌNH). CHỈ INVESTOR_SELF_VIEW: xem báo cáo/tất toán +
+  // xuất file, KHÔNG sửa/tạo/xóa NĐT, KHÔNG REVENUE_VIEW toàn hệ, KHÔNG hòm thư/thùng rác/xuất kho nội bộ
+  // (bị loại khỏi 2 vòng lặp bổ sung bên dưới, giống CUSTOMER). Data-scope ép về investorId ở tầng service.
+  R_INVESTOR: ['INVESTOR_SELF_VIEW'],
+  // KẾ TOÁN NĐT (Admin Demo 24/11) — quyền TỐI THIỂU để nhập bill + xem doanh số/bill/lãi + xuất Excel CỦA ĐÚNG
+  // 1 NĐT gán ở users.scope_investor_id. Phạm vi KHÓA Ở BACKEND (resolveScopeInvestorId) nên các quyền "xem"
+  // dưới đây đều bị LỌC theo NĐT ở route adapter / service — KHÔNG lộ dữ liệu NĐT khác.
+  //   • REVENUE_VIEW/MANAGE: màn Doanh Số (xem + NHẬP BILL thủ công). Cổng chính bảo mật: bill-manual GET/POST.
+  //   • INVESTOR_SELF_VIEW: báo cáo lãi + xuất Excel NĐT (investor-report ép scope).
+  //   • CONFIG_TID_VIEW + TID_VIEW: picker TID + ĐỌC giá bán. KHÔNG có TID_MANAGE ⇒ KHÔNG set/sửa giá.
+  //   • CONFIG_BANK_VIEW + CONFIG_FEE_VIEW: ngân hàng/loại thẻ/loại phí (danh mục CHUNG, không theo NĐT).
+  //   • POS_VIEW + CONFIG_RCV_ACCT_VIEW: xem POS gán TID + TK nhận tiền (LỌC theo scope ở route).
+  // KHÔNG: TID_MANAGE (set giá), mọi *_MANAGE cấu hình, KPI toàn-đại-lý, USER_*, ROLE_*, thu-chi, device-sale,
+  //        bill-explain, duyệt hủy, xuất kho, hòm thư/thùng rác (loại khỏi 2 vòng lặp bên dưới như R_INVESTOR).
+  R_KETOAN_NDT: [
+    'DASHBOARD_VIEW',
+    'REVENUE_VIEW', 'REVENUE_MANAGE',
+    'INVESTOR_SELF_VIEW',
+    'CONFIG_TID_VIEW', 'TID_VIEW',
+    'CONFIG_BANK_VIEW', 'CONFIG_FEE_VIEW',
+    'POS_VIEW', 'CONFIG_RCV_ACCT_VIEW'
+  ]
+};
+
+// Hòm thư + thùng rác cá nhân: MỌI người dùng đều có hòm thư của mình, gửi thư cho nhau,
+// và có thùng rác riêng (chỉ thấy đồ MÌNH xóa; Admin/Manager thấy TỔNG qua TRASH_VIEW_ALL).
+for (const roleCode of Object.keys(DEFAULT_ROLE_PERMISSIONS)) {
+  if (roleCode === 'R_INVESTOR' || roleCode === 'R_KETOAN_NDT') continue; // NĐT ngoài + Kế toán NĐT: giữ TỐI THIỂU, không hòm thư/thùng rác nội bộ.
+  for (const code of ['MESSAGE_VIEW', 'MESSAGE_SEND', 'TRASH_VIEW']) {
+    if (!DEFAULT_ROLE_PERMISSIONS[roleCode].includes(code)) DEFAULT_ROLE_PERMISSIONS[roleCode].push(code);
+  }
+}
+
+// PHASE 1 (Admin Demo 13/7): MỌI role vận hành đều XEM + TẠO được yêu cầu xuất kho ("user thường tạo yêu cầu").
+// Quyền DUYỆT (EXPORT_REQUEST_APPROVE) chỉ ADMIN/MANAGER/WAREHOUSE (gán riêng ở trên). CUSTOMER (role ngoài,
+// rỗng) KHÔNG nhận — không phải người dùng nội bộ vận hành kho.
+for (const roleCode of Object.keys(DEFAULT_ROLE_PERMISSIONS)) {
+  if (roleCode === 'CUSTOMER' || roleCode === 'R_INVESTOR' || roleCode === 'R_KETOAN_NDT') continue; // NĐT ngoài + Kế toán NĐT không phải vai vận hành kho.
+  for (const code of ['EXPORT_REQUEST_VIEW', 'EXPORT_REQUEST_CREATE']) {
+    if (!DEFAULT_ROLE_PERMISSIONS[roleCode].includes(code)) DEFAULT_ROLE_PERMISSIONS[roleCode].push(code);
+  }
+}
+
+/** THE permission check. Use everywhere — never compare role names directly. */
+export function hasPermission(user: Pick<AuthUser, 'permissions'> | null | undefined, code: string): boolean {
+  if (!user || !user.permissions) return false;
+  return user.permissions.includes(code);
+}
+
+export function hasAnyPermission(user: Pick<AuthUser, 'permissions'> | null | undefined, codes: string[]): boolean {
+  return codes.some((c) => hasPermission(user, c));
+}

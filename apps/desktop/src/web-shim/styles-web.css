@@ -1,0 +1,21 @@
+/* CSS ĐIỂM VÀO của BẢN WEB — KHÔNG sửa `renderer/src/styles.css` (dùng chung với bản desktop).
+ *
+ * BẪY ĐÃ DÍNH (6/11, bắt được bằng MẮT chứ không phải bằng test): Tailwind v4 (@tailwindcss/vite) tự dò nguồn
+ * class bắt đầu từ ROOT CỦA VITE. Bản web đặt `root: src/web-shim` ⇒ Tailwind chỉ quét thư mục đó (1 file .tsx
+ * + 1 index.html) nên BỎ QUA toàn bộ 45 trang + 30 component ở `src/renderer/src` → CSS sinh ra chỉ 15.998 byte
+ * (bản desktop: 80.406 byte), giao diện đăng nhập vỡ hoàn toàn (ô nhập 192×24px, nút tràn, không nền).
+ * `tsc` xanh, `vite build` exit 0, không một cảnh báo nào — ĐÚNG lớp lỗi R200 "test xanh ≠ mắt thấy đúng".
+ *
+ * VÁ: khai báo TƯỜNG MINH nguồn quét. Đường dẫn trong @source tính theo CHÍNH file .css này.
+ */
+@import '../renderer/src/styles.css';
+/* MẪU CHỐT 6/11 — bản desktop nạp file này ở `main.tsx`. Bản web có ĐIỂM VÀO RIÊNG nên phải tự nạp,
+ * nếu không toàn bộ luật nút/thanh cuộn/màu của mẫu mới KHÔNG tới bản web (đo thật 7/11: nút Đăng nhập
+ * vẫn bo góc 9999px kiểu viên thuốc cũ). Mọi file CSS dùng chung PHẢI nạp ở CẢ HAI điểm vào. */
+@import '../renderer/src/mau-moi.css';
+
+/* Quét class Tailwind trên ĐÚNG phạm vi mà bản desktop đang quét (`root: src/renderer` trong
+ * electron.vite.config.ts) + điểm vào của bản web ⇒ 2 bản sinh CÙNG tập class, không lệch kiểu "web thiếu
+ * 1 class chỉ 1 trang dùng". Kiểm bằng SỐ: kích thước .css của 2 bản phải xấp xỉ nhau (xem báo cáo). */
+@source '../renderer';
+@source '../web-shim';

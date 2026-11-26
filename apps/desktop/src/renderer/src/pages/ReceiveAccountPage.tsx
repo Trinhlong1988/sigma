@@ -1,0 +1,409 @@
+import { useEffect, useState, useRef } from 'react';
+import { Plus, Pencil, Trash2, Loader2, Wallet, Tag, Download, RefreshCw } from 'lucide-react';
+import type { AuthUser } from '@sigma/shared';
+import { hasPermission, fmtDate, fmtTime, prereqMessage } from '@sigma/shared';
+import type { RcvSourceDto, RcvAccountDto, LiteRef, CustomerDto, RcvAccountInput, InvestorDto, InvestorChatGroupOptionDto } from '../../../preload/index.d';
+import { useToast } from '../lib/toast.js';
+import { isStaleWrite, STALE_TITLE } from '../lib/optlock.js';
+import { Modal } from '../components/Modal.js';
+import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import { Field, inputCls } from '../components/Field.js';
+import { FilterBar } from '../components/FilterBar.js';
+import { Button } from '../components/Button.js';
+import { IconButton } from '../components/IconButton.js';
+import { StatBar } from '../components/StatBar.js';
+import { StaleBanner } from '../lib/realtime.js';
+import { CanhBaoCatDanhSach } from '../components/CanhBaoCatDanhSach.js';
+import { useRowSelection, SelectionBar, SelectAllCell, SelectCell } from '../components/Selection.js';
+import { Thumb, AttachField } from '../components/Attach.js';
+import { exportCsv } from '../lib/exportCsv.js';
+import { AuditTrailHeadCells, AuditTrailCells, AUDIT_TRAIL_COLS } from '../components/AuditCells.js';
+import { TabBar, TabButton } from '../components/Tabs.js';
+// MẪU CHỐT 6/11 — kiểu bảng lấy TỪ MODULE DÙNG CHUNG, cấm chép chuỗi class vào trang.
+import { thChuan, tdChuan, trChuan, KhungBang } from '../components/BangChuan.js';
+
+type Tab = 'account' | 'source';
+
+// Tông màu luân phiên (palette design system) cho bộ đếm theo NGUỒN tài khoản — không phải trạng thái.
+const SOURCE_TONES = ['bg-indigo-50 text-indigo-600', 'bg-emerald-50 text-emerald-600', 'bg-amber-50 text-amber-600', 'bg-sky-50 text-sky-600', 'bg-violet-50 text-violet-600', 'bg-rose-50 text-rose-600'];
+
+
+export function ReceiveAccountPage({ user }: { user: AuthUser }): JSX.Element {
+  const [tab, setTab] = useState<Tab>('account');
+  const canManage = hasPermission(user, 'CONFIG_RCV_ACCT_MANAGE');
+  return (
+    <div data-nut-vuong data-trang-full className="flex h-full min-h-0 w-full flex-col">
+      <div className="mb-4 shrink-0">
+        <h2 className="text-lg font-semibold text-slate-800">Quản Lý Tài Khoản Nhận Tiền</h2>
+        <p className="text-sm text-slate-500">Tài khoản nhận tiền (kèm CCCD ủy quyền) · Nguồn tài khoản.</p>
+      </div>
+      <div className="shrink-0">
+        <TabBar>
+          <TabButton active={tab === 'account'} onClick={() => setTab('account')} icon={<Wallet className="h-4 w-4" />}>Tài khoản nhận tiền</TabButton>
+          <TabButton active={tab === 'source'} onClick={() => setTab('source')} icon={<Tag className="h-4 w-4" />}>Nguồn tài khoản</TabButton>
+        </TabBar>
+      </div>
+      {tab === 'account' && <AccountTab canManage={canManage} />}
+      {tab === 'source' && <SourceTab canManage={canManage} />}
+    </div>
+  );
+}
+
+// ── §8a NGUỒN TÀI KHOẢN ──────────────────────────────────────────────────────
+function SourceTab({ canManage }: { canManage: boolean }): JSX.Element {
+  const toast = useToast();
+  const [rows, setRows] = useState<RcvSourceDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState<{ mode: 'create' | 'edit'; row?: RcvSourceDto } | null>(null);
+  const [del, setDel] = useState<RcvSourceDto | null>(null);
+  const [bulkDel, setBulkDel] = useState(false);
+  const sel = useRowSelection();
+
+  async function reload(): Promise<void> {
+    setLoading(true);
+    const res = await window.api.rcvSourceList();
+    if (res.ok && res.data) setRows(res.data);
+    else if (res.message) toast.alert(res.message);
+    sel.clear();
+    setLoading(false);
+  }
+  useEffect(() => { void reload(); /* eslint-disable-next-line */ }, []);
+
+  async function doDelete(s: RcvSourceDto, password?: string): Promise<void> {
+    const res = await window.api.rcvSourceDelete([s.id], password ?? '');
+    if (res.ok) toast.success(`Đã xóa nguồn ${s.name}`);
+    else toast.alert(res.message ?? 'Xóa nguồn thất bại', 'Xóa thất bại');
+    setDel(null); await reload();
+  }
+  async function doBulkDelete(password?: string): Promise<void> {
+    const res = await window.api.rcvSourceDelete([...sel.selected], password ?? '');
+    if (res.ok) toast.success(`Đã xóa ${res.deleted ?? sel.count} nguồn`);
+    else toast.alert(res.message ?? 'Xóa nguồn thất bại', 'Xóa thất bại');
+    setBulkDel(false); await reload();
+  }
+
+  // SỐ CỘT THẬT (§1): Tên nguồn + khối audit (3) + (ô tích, Thao tác) khi có quyền.
+  const soCot = 1 + AUDIT_TRAIL_COLS + (canManage ? 2 : 0);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* Nguồn tài khoản không có trường trạng thái/loại → chỉ đếm TỔNG (bộ đếm trực quan dùng chung). */}
+      <StatBar items={[{ label: 'Tổng nguồn tài khoản', value: rows.length, tone: 'bg-brand-tint text-brand' }]} />
+
+      <div className="mb-3 flex shrink-0 items-center justify-between">
+        <div className="text-sm text-slate-500">{rows.length} nguồn · <span className="text-slate-400">ví dụ: Khách hàng, Nội bộ</span></div>
+        <div className="flex gap-2">
+          <Button data-nut="lammoi" variant="soft" icon={<RefreshCw className="h-4 w-4" />} onClick={() => void reload()} title="Tải lại dữ liệu mới nhất (giữ nguyên bộ lọc)">Làm mới</Button>
+          <Button data-nut="excel" variant="confirm" icon={<Download className="h-4 w-4" />} onClick={() => exportCsv('nguon_tk', ['Tên nguồn', 'Người tạo', 'Ngày tạo', 'Giờ tạo', 'Người sửa', 'Ngày sửa', 'Giờ sửa'], rows.map((s) => [s.name, s.createdByName ?? '', fmtDate(s.createdAt), fmtTime(s.createdAt), s.updatedByName ?? '', fmtDate(s.updatedAt), fmtTime(s.updatedAt)]))}>Xuất Excel</Button>
+          {canManage && <Button variant="confirm" data-nut="them" icon={<Plus className="h-4 w-4" />} onClick={() => setForm({ mode: 'create' })}>Thêm nguồn</Button>}
+        </div>
+      </div>
+      {canManage && <SelectionBar count={sel.count} entityLabel="nguồn" onClear={sel.clear} onDelete={() => setBulkDel(true)} />}
+      {/* MẪU CHỐT 6/11 — KhungBang dùng chung; tiêu đề ghim trên. Bảng danh mục ⇒ không có hàng TỔNG. */}
+      <KhungBang>
+        <table className="h-full w-full min-w-[720px] text-xs">
+          <thead className="sticky top-0 z-20 bg-slate-200">
+            <tr>
+              {canManage && <SelectAllCell ids={rows.map((r) => r.id)} sel={sel} />}
+              <th className={thChuan + ' w-[320px]'}>Tên nguồn</th>
+              <AuditTrailHeadCells />
+              {canManage && <th className={thChuan + ' w-[100px]'}>Thao tác</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <tr><td colSpan={soCot} className="px-4 py-8 text-center text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={soCot} className="px-4 py-10 text-center text-slate-400"><Tag className="mx-auto mb-2 h-6 w-6" /> Chưa có nguồn tài khoản.</td></tr>}
+            {!loading && rows.map((s, i) => (
+              <tr key={s.id} className={trChuan(i, sel.isSelected(s.id))}>
+                {canManage && <SelectCell id={s.id} sel={sel} />}
+                <td className={tdChuan + ' font-medium text-slate-800'}>{s.name}</td>
+                <AuditTrailCells row={s} />
+                {canManage && (
+                  <td className={tdChuan}><div className="flex justify-center gap-1">
+                    <IconButton title="Sửa" tone="edit" onClick={() => setForm({ mode: 'edit', row: s })}><Pencil className="h-4 w-4" /></IconButton>
+                    <IconButton title="Xóa" tone="danger" onClick={() => setDel(s)}><Trash2 className="h-4 w-4" /></IconButton>
+                  </div></td>
+                )}
+              </tr>
+            ))}
+            {/* HÀNG ĐỆM (§1). */}
+            <tr aria-hidden className="h-full"><td colSpan={soCot} className="h-9" /></tr>
+          </tbody>
+        </table>
+      </KhungBang>
+      {form && <SourceForm mode={form.mode} row={form.row} onClose={() => setForm(null)} onSaved={() => { setForm(null); void reload(); }} />}
+      {del && <ConfirmDialog title="Xóa nguồn tài khoản" message={`Nguồn "${del.name}" sẽ vào Thùng rác (có thể phục hồi). Nhập lại mật khẩu để xác nhận.`} confirmLabel="Xóa" danger requirePassword onCancel={() => setDel(null)} onConfirm={(pwd) => doDelete(del, pwd)} />}
+      {bulkDel && <ConfirmDialog title="Xóa nhiều nguồn" message={`${sel.count} nguồn đã chọn sẽ vào Thùng rác (có thể phục hồi). Nhập lại mật khẩu để xác nhận.`} confirmLabel={`Xóa ${sel.count} mục`} danger requirePassword onCancel={() => setBulkDel(false)} onConfirm={(pwd) => doBulkDelete(pwd)} />}
+    </div>
+  );
+}
+
+function SourceForm({ mode, row, onClose, onSaved }: { mode: 'create' | 'edit'; row?: RcvSourceDto; onClose: () => void; onSaved: () => void }): JSX.Element {
+  const toast = useToast();
+  const [name, setName] = useState(row?.name ?? '');
+  const [busy, setBusy] = useState(false);
+  async function save(): Promise<void> {
+    if (!name.trim()) return toast.alert('Tên nguồn bắt buộc.', 'Thiếu thông tin');
+    setBusy(true);
+    const res = mode === 'edit' && row ? await window.api.rcvSourceUpdate(row.id, { name: name.trim(), expectedUpdatedAt: row.updatedAt }) : await window.api.rcvSourceCreate({ name: name.trim() });
+    setBusy(false);
+    if (res.ok) { toast.success(mode === 'edit' ? 'Đã cập nhật nguồn' : `Đã thêm nguồn ${name}`); onSaved(); }
+    else if (isStaleWrite(res)) { toast.alert(res.message ?? 'Bản ghi đã được người khác cập nhật, vui lòng mở lại.', STALE_TITLE); onSaved(); }
+    else toast.alert(res.message ?? 'Lưu nguồn thất bại', 'Không lưu được');
+  }
+  return (
+    <Modal title={mode === 'edit' ? 'Sửa nguồn tài khoản' : 'Thêm nguồn tài khoản'} onClose={onClose} width="max-w-md" onSubmit={() => void save()}>
+      <Field label="Tên nguồn" required hint="Ví dụ: Khách hàng, Nội bộ"><input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} autoFocus /></Field>
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="neutral" onClick={onClose}>Hủy</Button>
+        <Button variant="confirm" onClick={save} disabled={busy} icon={busy ? <Loader2 className="h-4 w-4 animate-spin" /> : undefined}>{mode === 'edit' ? 'Lưu thay đổi' : 'Thêm nguồn'}</Button>
+      </div>
+    </Modal>
+  );
+}
+
+// ── §8b TÀI KHOẢN NHẬN TIỀN ──────────────────────────────────────────────────
+function AccountTab({ canManage }: { canManage: boolean }): JSX.Element {
+  const toast = useToast();
+  const [rows, setRows] = useState<RcvAccountDto[]>([]);
+  const [tongDs, setTongDs] = useState<number | null>(null); // [B331]
+  const [sources, setSources] = useState<RcvSourceDto[]>([]);
+  const [banks, setBanks] = useState<LiteRef[]>([]);
+  const [customers, setCustomers] = useState<CustomerDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [fSource, setFSource] = useState('');
+  const [form, setForm] = useState<{ mode: 'create' | 'edit'; row?: RcvAccountDto } | null>(null);
+  const [del, setDel] = useState<RcvAccountDto | null>(null);
+  const [bulkDel, setBulkDel] = useState(false);
+  const sel = useRowSelection();
+
+  async function loadRefs(): Promise<void> {
+    const [s, b, c] = await Promise.all([window.api.rcvSourceList(), window.api.bankLite(), window.api.customerList({})]);
+    if (s.ok && s.data) setSources(s.data);
+    if (b.ok && b.data) setBanks(b.data);
+    if (c.ok && c.data) setCustomers(c.data);
+  }
+  // [VÁ 6/11] "Xóa lọc" trước đây dùng setTimeout(reload, 0) ⇒ chạy đúng CLOSURE CŨ nên vẫn gửi bộ
+  // lọc CŨ lên máy chủ (đo thật: gõ ZZZTEST, bấm Xóa lọc, máy chủ vẫn nhận search="ZZZTEST").
+  // Giữ bản MỚI NHẤT của reload trong ref rồi gọi qua ref — state đã commit xong mới gọi.
+  const reloadRef2 = useRef<() => void>(() => {});
+  reloadRef2.current = () => void reload();
+
+  async function reload(): Promise<void> {
+    setLoading(true);
+    const res = await window.api.rcvAccountList({ search: search || undefined, sourceId: fSource ? Number(fSource) : undefined });
+    if (res.ok && res.data) { setRows(res.data); setTongDs(res.total ?? null); }
+    else if (res.message) toast.alert(res.message);
+    sel.clear();
+    setLoading(false);
+  }
+  useEffect(() => { void loadRefs(); }, []);
+  useEffect(() => { void reload(); /* eslint-disable-next-line */ }, [fSource]);
+
+  async function doDelete(a: RcvAccountDto, password?: string): Promise<void> {
+    const res = await window.api.rcvAccountDelete([a.id], password ?? '');
+    if (res.ok) toast.success(`Đã xóa tài khoản ${a.accountNumber}`);
+    else toast.alert(res.message ?? 'Xóa tài khoản thất bại', 'Xóa thất bại');
+    setDel(null); await reload();
+  }
+  async function doBulkDelete(password?: string): Promise<void> {
+    const res = await window.api.rcvAccountDelete([...sel.selected], password ?? '');
+    if (res.ok) toast.success(`Đã xóa ${res.deleted ?? sel.count} tài khoản`);
+    else toast.alert(res.message ?? 'Xóa tài khoản thất bại', 'Xóa thất bại');
+    setBulkDel(false); await reload();
+  }
+
+  // SỐ CỘT THẬT (§1): 7 cột nghiệp vụ + (ô tích, Thao tác) khi có quyền.
+  const soCot = 7 + (canManage ? 2 : 0);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* Bộ đếm theo NGUỒN tài khoản (đếm CLIENT từ rcvAccountList) + tách Nội bộ (không gắn khách). */}
+      <StatBar
+        items={[
+          { label: 'Tổng tài khoản', value: rows.length, tone: 'bg-brand-tint text-brand' },
+          ...sources
+            .map((s, i) => ({
+              label: s.name,
+              value: rows.filter((r) => r.sourceId === s.id).length,
+              tone: SOURCE_TONES[i % SOURCE_TONES.length]
+            }))
+            .filter((it) => it.value > 0),
+          ...(rows.some((r) => r.owyType === 'INTERNAL')
+            ? [{ label: 'Nội bộ (không uỷ)', value: rows.filter((r) => r.owyType === 'INTERNAL').length, tone: 'bg-slate-100 text-slate-500' }]
+            : [])
+        ]}
+      />
+
+      <div className="mb-3 flex shrink-0 items-center justify-between">
+        <div className="text-sm text-slate-500">{rows.length} tài khoản</div>
+        <div className="flex gap-2">
+          <Button data-nut="excel" variant="confirm" icon={<Download className="h-4 w-4" />} onClick={() => exportCsv('tk_nhan_tien', ['Nguồn', 'Tên TK', 'STK', 'Ngân hàng', 'Chi nhánh', 'CCCD', 'Khách hàng', 'Số điện thoại'], rows.map((r) => [r.sourceName, r.accountName, r.accountNumber, r.bankCode, r.branch, r.cccdNumber, r.customerName ?? 'Nội bộ', r.phone]))}>Xuất Excel</Button>
+          {canManage && <Button data-nut="them" variant="confirm" icon={<Plus className="h-4 w-4" />} onClick={() => { const msg = prereqMessage([{ count: sources.length, label: 'Nguồn tài khoản', where: "tab 'Nguồn tài khoản'" }, { count: banks.length, label: 'Ngân hàng', where: "tab 'Ngân hàng'" }]); return msg ? toast.alert(msg, 'Thiếu dữ liệu nền') : setForm({ mode: 'create' }); }}>Thêm tài khoản</Button>}
+        </div>
+      </div>
+      <FilterBar search={search} onSearch={setSearch} searchPlaceholder="Tìm tên TK / STK / CCCD / SĐT / Mã KH / Tên khách…"
+        selects={[{ key: 's', placeholder: 'Tất cả nguồn', value: fSource, options: sources.map((s) => ({ value: String(s.id), label: s.name })), onChange: setFSource }]}
+        onApply={reload} onReset={() => { setSearch(''); setFSource(''); setTimeout(() => reloadRef2.current(), 0); }}
+        coChuNho locPhai />
+      {canManage && <SelectionBar count={sel.count} entityLabel="tài khoản" onClear={sel.clear} onDelete={() => setBulkDel(true)} />}
+      <StaleBanner domain={['ReceiveAccount', 'ReceiveAccountSource']} onReload={reload} /* [B330/F3-5] watch domain CON (service bump Source) */ className="mb-2" />
+      <CanhBaoCatDanhSach soHienThi={rows.length} tong={tongDs} className="mb-2" />
+      {/* MẪU CHỐT 6/11 — KhungBang dùng chung; tiêu đề ghim trên. Bảng danh mục ⇒ không có hàng TỔNG. */}
+      <KhungBang>
+        <table className="h-full w-full min-w-[1320px] text-xs">
+          <thead className="sticky top-0 z-20 bg-slate-200">
+            <tr>
+              {canManage && <SelectAllCell ids={rows.map((r) => r.id)} sel={sel} />}
+              <th className={thChuan + ' w-[120px]'}>Nguồn</th>
+              <th className={thChuan + ' w-[230px]'}>Tên tài khoản</th>
+              <th className={thChuan + ' w-[160px]'}>Số tài khoản</th>
+              <th className={thChuan + ' w-[180px]'}>Ngân hàng</th>
+              <th className={thChuan + ' w-[200px]'}>Uỷ</th>
+              <th className={thChuan + ' w-[140px]'}>CCCD</th>
+              <th className={thChuan + ' w-[110px]'}>Ảnh</th>
+              {canManage && <th className={thChuan + ' w-[100px]'}>Thao tác</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <tr><td colSpan={soCot} className="px-4 py-8 text-center text-slate-400"><Loader2 className="mx-auto h-5 w-5 animate-spin" /></td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={soCot} className="px-4 py-10 text-center text-slate-400"><Wallet className="mx-auto mb-2 h-6 w-6" /> Chưa có tài khoản nhận tiền.</td></tr>}
+            {!loading && rows.map((a, i) => (
+              <tr key={a.id} className={trChuan(i, sel.isSelected(a.id))}>
+                {canManage && <SelectCell id={a.id} sel={sel} />}
+                <td className={tdChuan + ' text-center'}><span className="rounded bg-brand-tint px-1.5 py-0.5 font-medium text-brand">{a.sourceName ?? '—'}</span></td>
+                <td className={tdChuan + ' font-medium text-slate-800'}>{a.accountName}</td>
+                {/* 2 cột SỐ (STK · CCCD): tabular-nums, cùng cỡ chữ 12px như mọi cột (§2). */}
+                <td className={tdChuan + ' font-mono tabular-nums text-slate-700'}>{a.accountNumber}</td>
+                <td className={tdChuan + ' text-slate-600'}>{a.bankCode ?? '—'}{a.branch ? ` · ${a.branch}` : ''}</td>
+                <td className={tdChuan + ' text-slate-600'}>{a.owyType === 'CUSTOMER' ? `Khách: ${a.owyName ?? '—'}` : a.owyType === 'INVESTOR' ? `NĐT: ${a.owyName ?? '—'}` : <span className="text-slate-400">Nội bộ</span>}</td>
+                <td className={tdChuan + ' font-mono tabular-nums text-slate-500'}>{a.cccdNumber ?? '—'}</td>
+                <td className={tdChuan}>
+                  <div className="flex justify-center gap-1">
+                    {a.cccdFrontPath ? <Thumb relPath={a.cccdFrontPath} label="CCCD mặt trước" /> : <span className="text-slate-400">—</span>}
+                    {a.cccdBackPath && <Thumb relPath={a.cccdBackPath} label="CCCD mặt sau" />}
+                  </div>
+                </td>
+                {canManage && (
+                  <td className={tdChuan}><div className="flex justify-center gap-1">
+                    <IconButton title="Sửa" tone="edit" onClick={() => setForm({ mode: 'edit', row: a })}><Pencil className="h-4 w-4" /></IconButton>
+                    <IconButton title="Xóa" tone="danger" onClick={() => setDel(a)}><Trash2 className="h-4 w-4" /></IconButton>
+                  </div></td>
+                )}
+              </tr>
+            ))}
+            {/* HÀNG ĐỆM (§1). */}
+            <tr aria-hidden className="h-full"><td colSpan={soCot} className="h-9" /></tr>
+          </tbody>
+        </table>
+      </KhungBang>
+      {form && <AccountForm mode={form.mode} row={form.row} sources={sources} banks={banks} customers={customers} onClose={() => setForm(null)} onSaved={() => { setForm(null); void reload(); }} />}
+      {del && <ConfirmDialog title="Xóa tài khoản nhận tiền" message={`Tài khoản "${del.accountName}" (${del.accountNumber}) sẽ vào Thùng rác (có thể phục hồi). Nhập lại mật khẩu để xác nhận.`} confirmLabel="Xóa" danger requirePassword onCancel={() => setDel(null)} onConfirm={(pwd) => doDelete(del, pwd)} />}
+      {bulkDel && <ConfirmDialog title="Xóa nhiều tài khoản" message={`${sel.count} tài khoản đã chọn sẽ vào Thùng rác (có thể phục hồi). Nhập lại mật khẩu để xác nhận.`} confirmLabel={`Xóa ${sel.count} mục`} danger requirePassword onCancel={() => setBulkDel(false)} onConfirm={(pwd) => doBulkDelete(pwd)} />}
+    </div>
+  );
+}
+
+function AccountForm({ mode, row, sources, banks, customers, onClose, onSaved }: { mode: 'create' | 'edit'; row?: RcvAccountDto; sources: RcvSourceDto[]; banks: LiteRef[]; customers: CustomerDto[]; onClose: () => void; onSaved: () => void }): JSX.Element {
+  const toast = useToast();
+  const [f, setF] = useState({
+    sourceId: row?.sourceId ? String(row.sourceId) : '',
+    accountName: row?.accountName ?? '',
+    accountNumber: row?.accountNumber ?? '',
+    bankId: row?.bankId ? String(row.bankId) : '',
+    branch: row?.branch ?? '',
+    cccdNumber: row?.cccdNumber ?? '',
+    cccdIssueDate: row?.cccdIssueDate ? row.cccdIssueDate.slice(0, 10) : '',
+    cccdIssuePlace: row?.cccdIssuePlace ?? '',
+    cccdExpiry: row?.cccdExpiry ? row.cccdExpiry.slice(0, 10) : '',
+    phone: row?.phone ?? '',
+    email: row?.email ?? '',
+    // UỶ (Phase B, MODEL 2-field) — 1 selector: loại (derived để prefill) + ref theo loại (customerId | investorId).
+    owyType: row?.owyType ?? 'INTERNAL', // owyType đọc-only từ DTO (derived) — dùng làm giá trị prefill selector.
+    customerId: row?.customerId ? String(row.customerId) : '',
+    investorId: row?.investorId ? String(row.investorId) : '',
+    // Nhóm chat NĐT (Phase E) — chỉ dùng khi uỷ=NĐT; nạp danh sách theo investorId.
+    investorChatGroupId: row?.investorChatGroupId ? String(row.investorChatGroupId) : ''
+  });
+  const [investors, setInvestors] = useState<InvestorDto[]>([]);
+  const [chatGroups, setChatGroups] = useState<InvestorChatGroupOptionDto[]>([]);
+  useEffect(() => { window.api.investorList({}).then((r) => r.ok && r.data && setInvestors(r.data)); }, []);
+  // Nạp nhóm chat của NĐT đang chọn (chỉ khi uỷ=NĐT). Đổi NĐT → nạp lại; uỷ khác → xóa danh sách.
+  useEffect(() => {
+    if (f.owyType !== 'INVESTOR' || !f.investorId) { setChatGroups([]); return; }
+    let alive = true;
+    window.api.investorChatGroupAssignable(Number(f.investorId)).then((r) => { if (alive && r.ok && r.data) setChatGroups(r.data); });
+    return () => { alive = false; };
+  }, [f.owyType, f.investorId]);
+  // Đính kèm: undefined = giữ, null = gỡ, string = ảnh mới (path nguồn).
+  const [frontSrc, setFrontSrc] = useState<string | null | undefined>(undefined);
+  const [backSrc, setBackSrc] = useState<string | null | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>): void => setF({ ...f, [k]: e.target.value });
+
+  async function save(): Promise<void> {
+    if (!f.sourceId) return toast.alert('Vui lòng chọn nguồn tài khoản.', 'Thiếu thông tin');
+    if (!f.accountName.trim()) return toast.alert('Tên tài khoản bắt buộc.', 'Thiếu thông tin');
+    if (!f.accountNumber.trim()) return toast.alert('Số tài khoản bắt buộc.', 'Thiếu thông tin');
+    if (!f.bankId) return toast.alert('Vui lòng chọn ngân hàng.', 'Thiếu thông tin');
+    if (f.owyType === 'CUSTOMER' && !f.customerId) return toast.alert('Uỷ Khách hàng — vui lòng chọn khách hàng.', 'Thiếu thông tin');
+    if (f.owyType === 'INVESTOR' && !f.investorId) return toast.alert('Uỷ Nhà đầu tư — vui lòng chọn nhà đầu tư.', 'Thiếu thông tin');
+    setBusy(true);
+    const input: RcvAccountInput = {
+      sourceId: Number(f.sourceId),
+      accountName: f.accountName.trim(),
+      accountNumber: f.accountNumber.trim(),
+      bankId: Number(f.bankId),
+      branch: f.branch || null,
+      cccdNumber: f.cccdNumber || null,
+      cccdIssueDate: f.cccdIssueDate || null,
+      cccdIssuePlace: f.cccdIssuePlace || null,
+      cccdExpiry: f.cccdExpiry || null,
+      phone: f.phone || null,
+      email: f.email || null,
+      // UỶ 2-field: đúng 1 bên set theo loại (bên kia null) → nội bộ = cả 2 null.
+      customerId: f.owyType === 'CUSTOMER' && f.customerId ? Number(f.customerId) : null,
+      investorId: f.owyType === 'INVESTOR' && f.investorId ? Number(f.investorId) : null,
+      // Nhóm chat NĐT (Phase E) — chỉ gửi khi uỷ=NĐT; uỷ khác → null (core cũng clear). Core validate thuộc đúng NĐT.
+      investorChatGroupId: f.owyType === 'INVESTOR' && f.investorChatGroupId ? Number(f.investorChatGroupId) : null
+    };
+    if (frontSrc !== undefined) input.cccdFrontSrc = frontSrc;
+    if (backSrc !== undefined) input.cccdBackSrc = backSrc;
+    const res = mode === 'edit' && row ? await window.api.rcvAccountUpdate(row.id, { ...input, expectedUpdatedAt: row.updatedAt }) : await window.api.rcvAccountCreate(input);
+    setBusy(false);
+    if (res.ok) { toast.success(mode === 'edit' ? 'Đã cập nhật tài khoản' : `Đã thêm tài khoản ${f.accountNumber}`); onSaved(); }
+    else if (isStaleWrite(res)) { toast.alert(res.message ?? 'Bản ghi đã được người khác cập nhật, vui lòng mở lại.', STALE_TITLE); onSaved(); }
+    else toast.alert(res.message ?? 'Lưu tài khoản thất bại', 'Không lưu được');
+  }
+
+  return (
+    <Modal title={mode === 'edit' ? `Sửa tài khoản ${row?.accountNumber}` : 'Thêm tài khoản nhận tiền'} onClose={onClose} width="max-w-2xl" onSubmit={() => void save()}>
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Nguồn tài khoản" required><select className={inputCls} value={f.sourceId} onChange={set('sourceId')} autoFocus><option value="">— Chọn nguồn —</option>{sources.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
+        <Field label="Uỷ (thuộc về)" hint="Tài khoản này uỷ cho: Khách hàng / Nhà đầu tư / Nội bộ"><select className={inputCls} value={f.owyType} onChange={set('owyType')}><option value="INTERNAL">Nội bộ</option><option value="CUSTOMER">Khách hàng</option><option value="INVESTOR">Nhà đầu tư</option></select></Field>
+        {f.owyType === 'CUSTOMER' && <Field label="Khách hàng (uỷ)" required><select className={inputCls} value={f.customerId} onChange={set('customerId')}><option value="">— Chọn khách hàng —</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.nickname} ({c.fullName})</option>)}</select></Field>}
+        {f.owyType === 'INVESTOR' && <Field label="Nhà đầu tư (uỷ)" required><select className={inputCls} value={f.investorId} onChange={(e) => setF({ ...f, investorId: e.target.value, investorChatGroupId: '' })}><option value="">— Chọn nhà đầu tư —</option>{investors.map((v) => <option key={v.id} value={v.id}>{v.nickname || v.fullName}{v.code ? ` · ${v.code}` : ''}</option>)}</select></Field>}
+        {f.owyType === 'INVESTOR' && f.investorId && <Field label="Nhóm chat NĐT" hint="Gắn nhóm chat của NĐT vào tài khoản này (tùy chọn)"><select className={inputCls} value={f.investorChatGroupId} onChange={set('investorChatGroupId')}><option value="">— Không gắn nhóm —</option>{chatGroups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}</select></Field>}
+        <Field label="Tên tài khoản" required><input className={inputCls} value={f.accountName} onChange={set('accountName')} /></Field>
+        <Field label="Số tài khoản" required><input className={inputCls} value={f.accountNumber} onChange={set('accountNumber')} /></Field>
+        <Field label="Ngân hàng" required><select className={inputCls} value={f.bankId} onChange={set('bankId')}><option value="">— Chọn ngân hàng —</option>{banks.map((b) => <option key={b.id} value={b.id}>{b.code}</option>)}</select></Field>
+        <Field label="Chi nhánh"><input className={inputCls} value={f.branch} onChange={set('branch')} /></Field>
+        <Field label="Số CCCD"><input className={inputCls} value={f.cccdNumber} onChange={set('cccdNumber')} /></Field>
+        <Field label="Nơi cấp CCCD"><input className={inputCls} value={f.cccdIssuePlace} onChange={set('cccdIssuePlace')} /></Field>
+        <Field label="Ngày cấp CCCD"><input type="date" className={inputCls} value={f.cccdIssueDate} onChange={set('cccdIssueDate')} /></Field>
+        <Field label="Ngày hết hạn CCCD"><input type="date" className={inputCls} value={f.cccdExpiry} onChange={set('cccdExpiry')} /></Field>
+        <Field label="Số điện thoại"><input className={inputCls} value={f.phone} onChange={set('phone')} /></Field>
+        <Field label="Email đối soát"><input className={inputCls} value={f.email} onChange={set('email')} /></Field>
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-4 rounded-lg border border-line bg-appbg/50 p-3">
+        <AttachField label="Ảnh CCCD mặt trước" current={frontSrc === null ? null : row?.cccdFrontPath ?? null} srcPath={typeof frontSrc === 'string' ? frontSrc : null} onPick={(p) => setFrontSrc(p)} onClear={() => setFrontSrc(null)} />
+        <AttachField label="Ảnh CCCD mặt sau (không bắt buộc)" current={backSrc === null ? null : row?.cccdBackPath ?? null} srcPath={typeof backSrc === 'string' ? backSrc : null} onPick={(p) => setBackSrc(p)} onClear={() => setBackSrc(null)} />
+      </div>
+      <div className="mt-6 flex justify-end gap-2">
+        <Button variant="neutral" onClick={onClose}>Hủy</Button>
+        <Button variant="confirm" onClick={save} disabled={busy} icon={busy ? <Loader2 className="h-4 w-4 animate-spin" /> : undefined}>{mode === 'edit' ? 'Lưu thay đổi' : 'Thêm tài khoản'}</Button>
+      </div>
+    </Modal>
+  );
+}

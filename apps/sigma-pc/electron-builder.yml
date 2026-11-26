@@ -1,0 +1,58 @@
+# electron-builder — SigMa PC (Windows). Vỏ Electron bọc web app chat SigMa.
+# KHÁC apps/desktop (com.sigma.app / "SigMa"). App NÀY = client chat cho Windows.
+appId: com.sigma.pc
+productName: SigMa
+
+# electron hoisted lên node_modules gốc (monorepo) — ghim exact theo bản đang cài (33.4.11)
+# để electron-builder khỏi phải suy ra từ range.
+electronVersion: 33.4.11
+
+directories:
+  output: dist
+  buildResources: build
+
+# Nội dung app: main/preload + renderer (web-demo đã build) + icon + package.json.
+files:
+  - src/**/*
+  - renderer/**/*
+  - build/icon.ico
+  - package.json
+  - "!**/*.map"
+
+# Icon.ico giải nén ra resources để BrowserWindow đặt icon cửa sổ/taskbar lúc runtime
+# (icon load từ asar không đáng tin).
+extraResources:
+  - from: build/icon.ico
+    to: icon.ico
+
+win:
+  target:
+    - nsis
+  icon: build/icon.ico
+  # CHƯA KÝ SỐ — không có cert desktop tái dùng cho app này. Bản cài chưa ký (SmartScreen có thể cảnh báo).
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  # Tên ASCII (tránh phi-ASCII gãy khi electron-updater tải qua HTTP); latest.yml tham chiếu đúng tên này.
+  artifactName: SigMa-${version}-setup.${ext}
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerLanguages:
+    - vi_VN
+  multiLanguageInstaller: true
+  runAfterFinish: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: SigMa
+
+# Feed cập nhật (electron-updater) — TÁI DÙNG hạ tầng feed SigMa (tunnel ec9f3365 → alpha-update.example.com
+# → serve 8687 phục vụ <UPDATES_DIR>, hỗ trợ subdir + Range 206). SigMa PC dùng SUBDIR RIÊNG `sigma/`
+# để KHÔNG va chạm latest.yml của SigMa Quản Lý — KHÔNG cần thêm DNS/hostname/tunnel/serve task mới.
+# Publish thủ công: `electron-builder ... --publish never` rồi copy dist\SigMa-*-setup.exe + latest.yml +
+# *.blockmap → <UPDATES_DIR>\sigma\. quitAndInstall(true,true) /S → tự cài IM + mở lại.
+publish:
+  provider: generic
+  url: https://alpha-update.example.com/updates/sigma/
+  channel: latest

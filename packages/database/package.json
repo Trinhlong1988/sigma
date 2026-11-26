@@ -1,0 +1,36 @@
+{
+  "name": "@sigma/database",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "generate": "prisma generate",
+    "migrate": "prisma migrate deploy",
+    "migrate:dev": "prisma migrate dev",
+    "reset": "prisma migrate reset --force",
+    "seed": "tsx prisma/seed.ts",
+    "studio": "prisma studio",
+    "typecheck": "tsc --noEmit",
+    "drift-guard": "node scripts/schema-drift-guard.mjs"
+  },
+  "dependencies": {
+    "@sigma/business-rules": "*",
+    "@sigma/shared": "*",
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10",
+    "bcryptjs": "^3.0.2",
+    "dotenv": "^17.2.0",
+    "prisma": "^7.8.0",
+    "tsx": "^4.19.2"
+  }
+}

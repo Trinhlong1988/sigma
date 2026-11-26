@@ -1,0 +1,379 @@
+/* ============================================================================================
+   MẪU THIẾT KẾ CHỐT 6/11/2026 (Admin Demo) — NGUỒN DUY NHẤT cho toàn bộ SigMa.
+   Trước đây khối này nằm INLINE trong BillManualEntryPage.tsx (phạm vi 1 trang). Nay tách ra để
+   MỌI trang dùng CHUNG — cấm chép lại từng nơi (chép là chắc chắn lệch dần, đã xảy ra với brand.css).
+   Cách dùng: đặt `data-nut-vuong` trên thẻ bọc ngoài cùng của trang. Bảng nổi (.fixed) tự ăn luật.
+   KHÔNG sửa brand.css bằng tay — đó là file TỰ SINH từ scripts/brand_sync.py.
+   ============================================================================================ */
+
+/* ── NÚT VUÔNG ÁP TOÀN APP (Admin Demo 7/11) ─────────────────────────────────────────────────────────
+   Trước đây luật nút chốt chỉ ăn trong `[data-nut-vuong]` hoặc bảng nổi `.fixed`, nên những màn KHÔNG
+   có thẻ bọc đó — điển hình là MÀN ĐĂNG NHẬP — vẫn giữ nút VIÊN THUỐC cũ (đo thật 7/11: bo góc 9999px).
+   Nay đặt luật ở phạm vi TOÀN APP; 2 khối scoped bên dưới giữ nguyên để thắng về độ ưu tiên khi cần.
+   Chỉ đổi HÌNH DÁNG (bo góc) ở phạm vi rộng — KHÔNG đổi đệm/cỡ chữ toàn app để không bóp méo các nút
+   lớn như "Đăng nhập". */
+button,
+.btn-primary,
+.btn-soft,
+.btn-teal,
+.btn-danger,
+.btn-edit { border-radius: 3.4px !important; }
+.btn-primary::before,
+.btn-soft::before,
+.btn-teal::before,
+.btn-danger::before { border-radius: 2.5px !important; }
+
+[data-nut-vuong] button,
+[data-nut-vuong] .btn-primary,
+[data-nut-vuong] .btn-soft,
+[data-nut-vuong] .btn-teal,
+[data-nut-vuong] .btn-danger,
+.fixed button,
+.fixed .btn-primary,
+.fixed .btn-soft,
+.fixed .btn-teal,
+.fixed .btn-danger{ border-radius: 3.4px !important; }
+[data-nut-vuong] .btn-primary::before,
+[data-nut-vuong] .btn-soft::before,
+[data-nut-vuong] .btn-teal::before,
+[data-nut-vuong] .btn-danger::before,
+.fixed .btn-primary::before,
+.fixed .btn-soft::before,
+.fixed .btn-teal::before,
+.fixed .btn-danger::before{ border-radius: 2.5px !important; }
+/* giảm 15%: px-4 py-2.5 text-sm (16/10/14px) → 13.6/8.5/11.9px */
+[data-nut-vuong] .btn-primary,
+[data-nut-vuong] .btn-soft,
+[data-nut-vuong] .btn-teal,
+[data-nut-vuong] .btn-danger,
+[data-nut-vuong] .btn-edit,
+.fixed .btn-primary,
+.fixed .btn-soft,
+.fixed .btn-teal,
+.fixed .btn-danger,
+.fixed .btn-edit{
+  padding-left: 13.6px !important; padding-right: 13.6px !important;
+  padding-top: 8.5px !important; padding-bottom: 8.5px !important;
+  font-size: 11.9px !important; line-height: 1.2 !important;
+}
+[data-nut-vuong] button svg,
+.fixed button svg{ width: 13.6px !important; height: 13.6px !important; }
+/* MAU NUT DIU (Admin Demo 6/11): xanh = chinh, do = xoa, vang = sua. Nen pastel + vien cung tong,
+   bo gradient/bong kinh cua brand.css cho nhe mat. */
+[data-nut-vuong] .btn-primary,
+[data-nut-vuong] .btn-teal,
+[data-nut-vuong] .btn-soft,
+[data-nut-vuong] .btn-danger,
+[data-nut-vuong] .btn-edit,
+.fixed .btn-primary,
+.fixed .btn-teal,
+.fixed .btn-soft,
+.fixed .btn-danger,
+.fixed .btn-edit{
+  background: none !important; box-shadow: none !important; text-shadow: none !important; font-weight: 600 !important;
+}
+[data-nut-vuong] .btn-primary::before,
+[data-nut-vuong] .btn-soft::before,
+[data-nut-vuong] .btn-teal::before,
+[data-nut-vuong] .btn-danger::before,
+.fixed .btn-primary::before,
+.fixed .btn-soft::before,
+.fixed .btn-teal::before,
+.fixed .btn-danger::before{ display: none !important; }
+[data-nut-vuong] .btn-primary,
+.fixed .btn-primary{ background-color: #e3f0fd !important; border: 1px solid #9ec8f0 !important; color: #14558f !important; }
+[data-nut-vuong] .btn-primary:hover,
+.fixed .btn-primary:hover{ background-color: #d3e6fb !important; }
+[data-nut-vuong] .btn-teal,
+.fixed .btn-teal{ background-color: #e2f7f8 !important; border: 1px solid #9adde2 !important; color: #0f6b73 !important; }
+[data-nut-vuong] .btn-soft,
+.fixed .btn-soft{ background-color: #f2f5f9 !important; border: 1px solid #cdd7e3 !important; color: #41566e !important; }
+[data-nut-vuong] .btn-soft:hover,
+.fixed .btn-soft:hover{ background-color: #e8eef5 !important; }
+[data-nut-vuong] .btn-danger,
+.fixed .btn-danger{ background-color: #fdeaea !important; border: 1px solid #f0b2b2 !important; color: #a32626 !important; }
+[data-nut-vuong] .btn-danger:hover,
+.fixed .btn-danger:hover{ background-color: #fbdada !important; }
+[data-nut-vuong] .btn-edit,
+.fixed .btn-edit{ background-color: #fdf4df !important; border: 1px solid #ecd296 !important; color: #8a6200 !important; }
+[data-nut-vuong] .btn-edit:hover,
+.fixed .btn-edit:hover{ background-color: #fbecc8 !important; }
+/* Nút chính trong bảng nổi: MÀU ĐẬM TƯƠI + NỔI 3D (Admin Demo 6/11). */
+[data-nut-vuong] [data-nut='ghibill'], .fixed [data-nut='ghibill'] {
+  background: linear-gradient(180deg, #3f9bf0 0%, #1877d6 55%, #10589f 100%) !important;
+  border: 1px solid #0f4d8c !important; color: #fff !important;
+  box-shadow: 0 2px 0 #0d4273, 0 4px 10px rgba(16,88,159,.45), inset 0 1px 0 rgba(255,255,255,.45) !important;
+  min-width: 119px !important; max-width: 119px !important; justify-content: center !important; padding-left: 4px !important; padding-right: 4px !important; font-size: 11px !important; white-space: nowrap !important;
+}
+[data-nut-vuong] [data-nut='ghibill']:active, .fixed [data-nut='ghibill']:active { transform: translateY(1px); box-shadow: 0 1px 0 #0d4273 !important; }
+[data-nut-vuong] [data-nut='xoaform'], .fixed [data-nut='xoaform'] {
+  background: linear-gradient(180deg, #ff6b6b 0%, #e23b3b 55%, #b81d1d 100%) !important;
+  border: 1px solid #a81a1a !important; color: #fff !important;
+  box-shadow: 0 2px 0 #8d1515, 0 4px 10px rgba(184,29,29,.4), inset 0 1px 0 rgba(255,255,255,.4) !important;
+  min-width: 110px !important; justify-content: center !important;
+}
+[data-nut-vuong] [data-nut='xoaform']:active, .fixed [data-nut='xoaform']:active { transform: translateY(1px); box-shadow: 0 1px 0 #8d1515 !important; }
+/* Nút thu nhỏ + đóng ở tiêu đề bảng nổi: TO RÕ, nổi 3D. */
+.fixed [data-nut='thunho'], .fixed button[title='Đóng'] {
+  height: 32px !important; width: 32px !important; border-radius: 6px !important;
+  display: inline-flex !important; align-items: center; justify-content: center;
+  box-shadow: 0 2px 0 rgba(0,0,0,.12), inset 0 1px 0 rgba(255,255,255,.6) !important;
+}
+.fixed [data-nut='thunho'] { background: #e8eef5 !important; border: 1px solid #b9c7d8 !important; color: #2b6ca3 !important; }
+.fixed button[title='Đóng'] { background: #fdeaea !important; border: 1px solid #f0b2b2 !important; color: #b81d1d !important; }
+/* Thanh cuộn của khung bảng: CAO 16px, con trượt đậm + bo tròn để kéo dễ (Admin Demo 6/11).
+   Chromium bỏ qua scrollbar-width nên phải dùng ::-webkit-scrollbar. */
+[data-kiem='khung-bang'] { scrollbar-width: auto; scrollbar-color: #7aa7cf #e7edf4; }
+[data-kiem='khung-bang']::-webkit-scrollbar { height: 16px; width: 14px; }
+[data-kiem='khung-bang']::-webkit-scrollbar-track { background: #e7edf4; border-radius: 8px; }
+[data-kiem='khung-bang']::-webkit-scrollbar-thumb { background: #7aa7cf; border: 3px solid #e7edf4; border-radius: 8px; min-width: 70px; }
+[data-kiem='khung-bang']::-webkit-scrollbar-thumb:hover { background: #1763a5; }
+[data-kiem='khung-bang']::-webkit-scrollbar-corner { background: #e7edf4; }
+/* ── LUẬT NÚT THEO DẤU data-nut ───────────────────────────────────────────────────────────────────
+   Dạng selector `[data-nut-vuong] button[data-nut='…']` (độ ưu tiên 0-2-1) là CỐ Ý, không thừa:
+   luật cũ `[data-nut-vuong] .btn-primary` là 0-2-0 và cũng có !important, nên nếu chỉ viết
+   `[data-nut='excel']` (0-1-0) thì THUA — đo thật 12/11: 153 phép kiểm đỏ, nút gắn dấu rồi mà vẫn giữ
+   màu cũ. `!important` không phân thắng bại khi cả hai cùng có; chỉ độ ưu tiên mới quyết.
+   Thẻ bọc [data-nut-vuong] nay nằm ở <main> của Dashboard ⇒ MỌI màn chức năng đều nằm trong. */
+[data-nut-vuong] button[data-nut]{ background-image: none !important; text-shadow: none !important; }
+[data-nut-vuong] button[data-nut]::before{ display: none !important; }
+/* MỖI NÚT 1 MÀU RIÊNG, nổi 3D (Admin Demo 6/11) — nhìn là biết nút nào, không lẫn. */
+[data-nut-vuong] button[data-nut='chuky'] { background: #f3ecff !important; background-image: none !important; border: 1px solid #c4b5fd !important; color: #5b21b6 !important; }
+[data-nut-vuong] button[data-nut='xoaloc'] { background: #ffecec !important; background-image: none !important; border: 1px solid #f0a8a8 !important; color: #a32626 !important; }
+[data-nut-vuong] button[data-nut='lammoi'] { background: #e9f3fd !important; background-image: none !important; border: 1px solid #a9cdf0 !important; color: #2b6ca3 !important; }
+[data-nut-vuong] button[data-nut='bieudo'] { background: #e2f7f4 !important; background-image: none !important; border: 1px solid #8fd8cd !important; color: #0f766e !important; }
+[data-nut-vuong] button[data-nut='baocao'] { background: #fff2df !important; background-image: none !important; border: 1px solid #f0c48a !important; color: #b45309 !important; }
+[data-nut-vuong] button[data-nut='excel'] { background: #e8f8ee !important; background-image: none !important; border: 1px solid #9fd9b5 !important; color: #1d7a3c !important; }
+[data-nut-vuong] button[data-nut='chuky'], [data-nut-vuong] button[data-nut='xoaloc'], [data-nut-vuong] button[data-nut='lammoi'], [data-nut-vuong] button[data-nut='loc'],
+[data-nut-vuong] button[data-nut='bieudo'], [data-nut-vuong] button[data-nut='baocao'], [data-nut-vuong] button[data-nut='excel'],
+[data-nut-vuong] button[data-nut='xoabill'], [data-nut-vuong] button[data-nut='them'] {
+  box-shadow: 0 2px 0 rgba(15,23,42,.12), inset 0 1px 0 rgba(255,255,255,.75) !important;
+}
+[data-nut-vuong] button[data-nut]:active { transform: translateY(1px); box-shadow: 0 1px 0 rgba(15,23,42,.12) !important; }
+/* Nút thanh công cụ: CÙNG BỀ NGANG TỐI THIỂU 119px (nhãn dài ngắn khác nhau nhìn vẫn đều) — Admin Demo 6/11,
+   mở rộng ra toàn app 12/11.
+   CHỈ màn Doanh Số mới KHOÁ CỨNG max-width: ở đó mọi nhãn đều ngắn nên ép bằng nhau là đẹp. Màn khác có
+   nhãn dài ("Tạo bản sao lưu ngay", "Thêm nhà cung cấp") — khoá cứng 119px là CẮT CỤT CHỮ, nên để nở ra. */
+[data-nut-vuong] button[data-nut='chuky'], [data-nut-vuong] button[data-nut='ky'], [data-nut-vuong] button[data-nut='xoaloc'], [data-nut-vuong] button[data-nut='lammoi'],
+[data-nut-vuong] button[data-nut='xoabill'], [data-nut-vuong] button[data-nut='bieudo'], [data-nut-vuong] button[data-nut='baocao'],
+[data-nut-vuong] button[data-nut='excel'], [data-nut-vuong] button[data-nut='them'], [data-nut-vuong] button[data-nut='loc'],
+[data-nut-vuong] button[data-nut='nhap'], [data-nut-vuong] button[data-nut='xem'], [data-nut-vuong] button[data-nut='themqr'] {
+  min-width: 119px !important; justify-content: center !important; padding-left: 8px !important; padding-right: 8px !important; font-size: 11px !important; white-space: nowrap !important;
+  padding-top: 8.5px !important; padding-bottom: 8.5px !important; line-height: 1.2 !important; font-weight: 600 !important;
+}
+[data-man='doanhso'] button[data-nut='chuky'], [data-man='doanhso'] button[data-nut='xoaloc'], [data-man='doanhso'] button[data-nut='lammoi'],
+[data-man='doanhso'] button[data-nut='xoabill'], [data-man='doanhso'] button[data-nut='bieudo'], [data-man='doanhso'] button[data-nut='baocao'],
+[data-man='doanhso'] button[data-nut='excel'], [data-man='doanhso'] button[data-nut='them'] {
+  max-width: 119px !important; padding-left: 4px !important; padding-right: 4px !important;
+}
+[data-nut-vuong] button[data-nut] svg { width: 13.6px !important; height: 13.6px !important; }
+/* Nut "Them bill moi": nen XANH SIGMA NHE (brand-tint) + vien brand (Admin Demo 6/11). */
+[data-nut-vuong] button[data-nut='them']{ background-color: #1877d6 !important; border: 1px solid #1763a5 !important; color: #ffffff !important; }
+[data-nut-vuong] button[data-nut='them']:hover{ background-color: #1763a5 !important; }
+/* 2 nut chuyen len thanh tren: giu dung mau da chot (xoa loc = do, lam moi = xanh bien nhe) */
+[data-nut-vuong] button[data-nut='xoaloc']{ background-color: #fdeaea !important; border: 1px solid #f0b2b2 !important; color: #a32626 !important; }
+[data-nut-vuong] button[data-nut='lammoi']{ background-color: #e8f3fc !important; border: 1px solid #b4d6f2 !important; color: #2b6ca3 !important; }
+/* Xoa bill chon: NEN DO CHU TRANG (Admin Demo 6/11) */
+[data-nut-vuong] button[data-nut='xoabill']{ background-color: #d92d2d !important; border: 1px solid #b31f1f !important; color: #ffffff !important; }
+[data-nut-vuong] button[data-nut='xoabill']:hover{ background-color: #b31f1f !important; }
+[data-nut-vuong] button[data-nut='xoabill']:disabled{ background-color: #f0b2b2 !important; border-color: #e09a9a !important; color: #ffffff !important; }
+/* "Xuất Excel" và "Lọc" đều XANH LÁ (màu chốt của Doanh Số). Bắt bằng data-nut — KHÔNG bắt bằng lớp
+   khoảng cách `.mb-3` như trước: FilterBar đã đổi sang mb-2/mb-1 nên luật cũ CHẾT ÂM THẦM, 21 màn mất màu. */
+[data-nut-vuong] button[data-nut='excel'],
+[data-nut-vuong] button[data-nut='loc']{
+  background-color: #e7f6ec !important; border: 1px solid #a6d9b6 !important; color: #1d7a3c !important;
+  background-image: none !important; box-shadow: 0 2px 0 rgba(15,23,42,.12), inset 0 1px 0 rgba(255,255,255,.75) !important;
+}
+[data-nut-vuong] button[data-nut='excel']:hover,
+[data-nut-vuong] button[data-nut='loc']:hover{ background-color: #d8f0e1 !important; }
+
+/* NHÓM NÚT PHỤ (12/11) — vẫn cùng ngôn ngữ màu, chỉ khác sắc độ để phân biệt việc:
+   · nhap = NẠP dữ liệu vào (Nhập Excel / Nhập từ file / Import mẫu) → xanh ngọc
+   · xem  = xem thêm / mở rộng danh sách (Xem lịch sử đã duyệt) → ghi xanh trung tính
+   · themqr = cùng họ với "Thêm" (nền đặc xanh SigMa, chữ trắng) */
+[data-nut-vuong] button[data-nut='nhap']{
+  background-color: #e2f7f8 !important; border: 1px solid #9adde2 !important; color: #0f6b73 !important;
+  box-shadow: 0 2px 0 rgba(15,23,42,.12), inset 0 1px 0 rgba(255,255,255,.75) !important;
+}
+[data-nut-vuong] button[data-nut='nhap']:hover{ background-color: #d2f0f2 !important; }
+[data-nut-vuong] button[data-nut='xem']{
+  background-color: #f2f5f9 !important; border: 1px solid #cdd7e3 !important; color: #41566e !important;
+  box-shadow: 0 2px 0 rgba(15,23,42,.12), inset 0 1px 0 rgba(255,255,255,.75) !important;
+}
+[data-nut-vuong] button[data-nut='xem']:hover{ background-color: #e8eef5 !important; }
+[data-nut-vuong] button[data-nut='themqr']{
+  background-color: #1877d6 !important; border: 1px solid #1763a5 !important; color: #ffffff !important;
+  box-shadow: 0 2px 0 rgba(15,23,42,.12), inset 0 1px 0 rgba(255,255,255,.28) !important;
+}
+[data-nut-vuong] button[data-nut='themqr']:hover{ background-color: #1763a5 !important; }
+
+/* ── TRANG FULL: CHỈ CÒN 1 THANH CUỘN (Admin Demo 13/11 "có 2 thang cuộn") ────────────────────────
+   Trang đánh dấu `data-trang-full` chiếm trọn chiều cao vùng nội dung; khung bảng là ô co giãn duy
+   nhất và tự cuộn bên trong. `.list-scroll` bỏ trần chiều cao để không sinh thanh cuộn thứ hai. */
+[data-trang-full] {
+  display: flex !important;
+  flex-direction: column !important;
+  min-height: 0 !important;
+  flex: 1 1 auto !important;
+  /* Cao TỐI ĐA bằng vùng nội dung — không cho trang dài ra theo bảng, nếu không khung bảng sẽ phình
+     (đo thật: 14.258px) và `thead sticky` mất tác dụng vì khung bảng không còn là ô cuộn. */
+}
+/* Mọi hàng con GIỮ NGUYÊN chiều cao — nếu không, flex-column bóp bẹp hàng lọc (đo thật: 46px → 6px). */
+[data-trang-full] > * { flex: 0 0 auto; }
+[data-trang-full] .list-scroll { max-height: none !important; }
+[data-trang-full] [data-kiem='khung-bang'] { min-height: 0 !important; flex: 1 1 auto !important; }
+
+/* ── GHIM TIÊU ĐỀ: ép chuỗi từ TRANG xuống KHUNG BẢNG thành cột co giãn ────────────────────────
+   Trang NÀO CÓ khung bảng thì cao đúng bằng khung nhìn (không dài theo nội dung nữa) — nhờ vậy khung
+   bảng mới là ô cuộn và `thead sticky top-0` mới ghim được. */
+[data-trang-full]:has([data-kiem='khung-bang']) {
+  flex: 1 1 0% !important;   /* chia phần CÒN LẠI — KHÔNG dùng height:100% (phần trăm rơi về nội dung
+                                khi lớp cha không có chiều cao xác định; đo thật: 11.198px) */
+  min-height: 0 !important;
+  height: auto !important;
+  overflow: hidden !important;
+}
+/* Mọi lớp bọc TỪ <main> XUỐNG tới trang full cũng phải là cột co giãn, nếu không chuỗi đứt ở đó. */
+main > .page-enter,
+main *:has(> [data-trang-full]) {
+  display: flex !important;
+  flex-direction: column !important;
+  min-height: 0 !important;
+  flex: 1 1 0% !important;
+}
+/* MỌI lớp bọc chen giữa trang và khung bảng → cột co giãn (đo thật: 4/12 màn có 1 lớp như vậy). */
+[data-trang-full] *:has(> [data-kiem='khung-bang']),
+[data-trang-full] *:has([data-kiem='khung-bang']) {
+  display: flex !important;
+  flex-direction: column !important;
+  min-height: 0 !important;
+  flex: 1 1 0% !important;
+}
+/* Khung bảng chia phần CÒN LẠI (basis 0), có sàn 160px để không bị bóp mất khi phần trên quá cao. */
+[data-trang-full] [data-kiem='khung-bang'] { flex: 1 1 0% !important; min-height: 160px !important; }
+/* Hàng CUỘN NGANG (dải chip ngân hàng, thanh lọc) đang rỉ ra thanh cuộn DỌC vài chục px — đo thật
+   13/11: 1 hàng dư 40px, 1 hàng dư 17px ⇒ thành 2 thanh cuộn thừa. Chúng vốn chỉ cần cuộn ngang. */
+[data-trang-full] .overflow-x-auto { overflow-y: hidden !important; }
+
+/* ── QUÉT SẠCH TOÀN BỘ NÚT TRONG TRANG (Admin Demo 13/11) ──────────────────────────────────────────
+   "toàn bộ button làm sạch đi trong từng màn đồng nhất doanh số".
+   Trước đó mới làm sạch các nút MANG DẤU data-nut; nút icon trong hàng, nút hộp thoại, nút phân trang…
+   vẫn giữ gradient + quầng sáng của brand.css nên nhìn vào màn vẫn thấy lổn nhổn.
+   Luật này ở độ ưu tiên 0-2-0, nên các luật riêng (0-2-1) vẫn đè được chỗ nào cần bóng nổi nhẹ. */
+[data-nut-vuong] button,
+.fixed button {
+  background-image: none !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  border-radius: 3.4px !important;
+}
+[data-nut-vuong] button::before,
+.fixed button::before { display: none !important; }
+/* Nút icon trong hàng: giữ nền trong suốt, chỉ sáng nhẹ khi di chuột — không viền, không bóng. */
+[data-nut-vuong] td button:not([data-nut]),
+.fixed td button:not([data-nut]) { background-color: transparent !important; }
+
+/* ── DẢI TAB TRONG TRANG — PHẲNG, CÙNG BẢNG MÀU (Admin Demo 13/11 "các button bên trong vẫn bị") ────
+   Trước: tab đang chọn là `brand-accent` — gradient xanh sáng + QUẦNG SÁNG rgba(163,222,253,.55).
+   Đó là ổ 3D to nhất còn lại trong trang. Nay dùng ĐÚNG bộ màu nút "Làm mới" như mục menu đang chọn.
+   Dải nền đổi sang ghi xanh trung tính để tab xanh nhạt nổi lên được (nền brand/20 cũ cùng tông, đặt
+   tab xanh nhạt lên là chìm nghỉm). */
+[data-tab-bar] {
+  background: #f2f5f9 !important;
+  border: 1px solid #e3e9f0 !important;
+  border-radius: 3.4px !important;
+}
+[data-tab-bar] button {
+  border-radius: 3.4px !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  color: #41566e !important;
+  font-size: 11.9px !important;
+  padding: 8.5px 13.6px !important;
+}
+[data-tab-bar] button::before { display: none !important; }
+[data-tab-bar] button:hover { background: #e8eef5 !important; }
+[data-tab-bar] button svg { width: 13.6px !important; height: 13.6px !important; }
+/* Tab ĐANG CHỌN — giống hệt nút "Làm mới" và mục menu đang chọn. */
+[data-tab-bar] button.brand-accent,
+[data-tab-bar] button[data-chon='1'] {
+  background: #e8f3fc !important;
+  border-color: #b4d6f2 !important;
+  color: #2b6ca3 !important;
+  font-weight: 600 !important;
+  box-shadow: 0 2px 0 rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.75) !important;
+}
+
+/* ── NÚT MENU BÊN TRÁI — ĐỒNG NHẤT VỚI NÚT CHỨC NĂNG (Admin Demo 13/11) ─────────────────────────────
+   Trước: mục đang chọn nổi 3D kiểu "viên thuốc" (gradient brand-accent + bóng đậm + viền sáng + nhấc lên
+   + phóng to 1,02 lần + bo góc 12px). Đặt cạnh "Làm mới / Chọn chu kỳ" ở thanh công cụ thì lạc hẳn tông.
+   Nay: mục ĐANG CHỌN dùng ĐÚNG bộ màu nút "Làm mới" — nền #e8f3fc, viền #b4d6f2, chữ #2b6ca3, bo 3,4px,
+   nổi nhẹ đúng mức `0 2px 0` như mọi nút chức năng. Cả app chỉ còn MỘT ngôn ngữ nút. */
+[data-nut-menu] {
+  border-radius: 3.4px !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  transform: none !important;
+  text-shadow: none !important;
+}
+[data-nut-menu]::before { display: none !important; }
+[data-nut-menu]:hover {
+  background-color: #f2f5f9 !important;
+  border-color: #cdd7e3 !important;
+  color: #41566e !important;
+}
+[data-nut-menu][data-chon='1'] {
+  background-color: #e8f3fc !important;
+  border-color: #b4d6f2 !important;
+  color: #2b6ca3 !important;
+  box-shadow: 0 2px 0 rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.75) !important;
+}
+[data-nut-menu][data-chon='1']:hover { background-color: #dceaf8 !important; }
+[data-nut-menu]:active { transform: translateY(1px) !important; box-shadow: 0 1px 0 rgba(15, 23, 42, 0.12) !important; }
+/* Ô icon: bỏ nền riêng, chỉ còn icon — không còn "ô trong ô" lổn nhổn. */
+[data-nut-menu] [data-o-icon] { background: none !important; border-radius: 3.4px !important; }
+[data-nut-menu] svg { width: 18px !important; height: 18px !important; }
+
+/* Nút ĐĂNG XUẤT ở đáy menu (Admin Demo 13/11 "làm phẳng nút đăng xuất luôn đi").
+   Nằm NGOÀI `main[data-nut-vuong]` nên phải khai riêng ở phạm vi toàn app.
+   GIỮ đỏ đặc chữ trắng (đây là nút thoát, phải nổi bật) nhưng BỎ bóng kính/gradient, về phẳng + bo 3,4px
+   + nổi nhẹ `0 2px 0` — cùng hệ với "Xóa bill chọn". */
+[data-nut='dangxuat'] {
+  background: #d92d2d !important;
+  background-image: none !important;
+  border: 1px solid #b31f1f !important;
+  color: #ffffff !important;
+  border-radius: 3.4px !important;
+  box-shadow: 0 2px 0 rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.28) !important;
+  text-shadow: none !important;
+  font-weight: 600 !important;
+  font-size: 11.9px !important;
+  padding: 8.5px 13.6px !important;
+  line-height: 1.2 !important;
+}
+[data-nut='dangxuat']::before { display: none !important; }
+[data-nut='dangxuat']:hover { background: #b31f1f !important; }
+[data-nut='dangxuat']:active { transform: translateY(1px); box-shadow: 0 1px 0 rgba(15, 23, 42, 0.12) !important; }
+[data-nut='dangxuat'] svg { width: 13.6px !important; height: 13.6px !important; }
+
+/* ── MÀN ĐĂNG NHẬP: nút theo ĐÚNG màu chốt (Admin Demo 7/11 "màu mới rất xấu ở màn đăng nhập") ──────────
+   Nút cũ là "kính" gradient nhạt + bóng loáng; ghép với góc vuông 3,4px của mẫu mới thì nhìn rất chối.
+   Mẫu chốt dùng MÀU ĐẶC: nền #1877d6, viền #1763a5, chữ TRẮNG, nổi 3D nhẹ — giống hệt nút "Ghi nhận bill"
+   và "Thêm bill mới" ở màn Doanh Số, để cả app chỉ có MỘT kiểu nút chính. */
+[data-nut='dangnhap'] {
+  background: #1877d6 !important;
+  background-image: none !important;
+  border: 1px solid #1763a5 !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 0 rgba(15, 23, 42, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.28) !important;
+  font-weight: 600 !important;
+}
+[data-nut='dangnhap']::before { display: none !important; }
+[data-nut='dangnhap']:hover { background: #1763a5 !important; }
+[data-nut='dangnhap']:active { transform: translateY(1px); box-shadow: 0 1px 0 rgba(15, 23, 42, 0.18) !important; }
+[data-nut='dangnhap']:disabled { background: #9db9d6 !important; border-color: #8aa8c7 !important; box-shadow: none !important; }

@@ -1,0 +1,10 @@
+// SIGMA Giai đoạn 1 (26/7) — npm workspace HOIST @react-native/* lên node_modules GỐC repo (không nằm
+// trong apps/mobile/node_modules cục bộ như template RN mặc định giả định) — sửa đường dẫn tương đối cho
+// đúng vị trí thật (apps/mobile/android/ -> ../../../node_modules = node_modules gốc repo). Đây là 1 trong
+// những điểm ma sát thật giữa React Native CLI template và cấu trúc npm workspaces monorepo, xem báo cáo.
+pluginManagement { includeBuild("../../../node_modules/@react-native/gradle-plugin") }
+plugins { id("com.facebook.react.settings") }
+extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
+rootProject.name = 'com.sigma.mobile'
+include ':app'
+includeBuild('../../../node_modules/@react-native/gradle-plugin')

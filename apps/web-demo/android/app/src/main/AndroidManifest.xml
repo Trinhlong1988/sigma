@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+    <!-- Vòng 2.5 hardening (3/8) — TẮT backup: WebView data store của app (origin https://localhost) chứa
+         CẢ cookie phiên httpOnly `sigma_ws` (token xác thực RC thật, xem web-session-service.ts) LẪN
+         `sigma_device_token` trong localStorage (vé bỏ-qua-OTP, plaintext — session.ts). Với
+         allowBackup="true" (mặc định Capacitor), Android Auto Backup TỰ đẩy 2 thứ này lên Google Drive của
+         người dùng (tối đa 25MB) + `adb backup` rút được trên máy không root → lộ token phiên + hạ 2FA
+         (kẻ có backup + mật khẩu vẫn qua device-bypass mà KHÔNG cần OTP). App xác thực KHÔNG nên để dữ liệu
+         phiên đi theo backup/khôi phục sang máy khác. allowBackup="false" tắt cả Auto Backup, adb backup và
+         chuyển-máy D2D cho dữ liệu app. dataExtractionRules loại trừ tường minh (Android 12+/targetSdk 36)
+         để rõ ý định kể cả nếu ai đó bật lại backup sau này. -->
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+        <!-- B115-tiếp (2/8) — GỠ service mặc định của @capacitor/push-notifications (tools:node="remove" khớp
+             android:name gốc plugin khai trong AndroidManifest.xml của nó) — CHỈ 1 service duy nhất được xử lý
+             sự kiện com.google.firebase.MESSAGING_EVENT (SigMaMessagingService bên dưới), tránh 2 service
+             cùng nhận 1 message (double-dispatch/double-notify). -->
+        <service android:name="com.capacitorjs.plugins.pushnotifications.MessagingService" tools:node="remove" />
+
+        <!-- B115-tiếp (2/8, Admin Demo "trả lời trực tiếp ngay tại thông báo push, kiểu Zalo") — THAY THẾ service
+             gốc ở trên: forward nguyên vẹn mọi loại push KHÁC cho plugin gốc xử lý (KHÔNG đổi hành vi cũ), CHỈ
+             tự xây notification kèm action "Trả lời" (RemoteInput) cho tin nhắn chat (data.kind=chat_message).
+             Xem SigMaMessagingService.java. -->
+        <service android:name=".SigMaMessagingService" android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- B115-tiếp (2/8) — nhận RemoteInput từ action "Trả lời" trên notification, gửi thẳng tin nhắn qua
+             REST KHÔNG mở app. exported=false — PendingIntent do CHÍNH app tạo vẫn gọi được từ tiến trình
+             SystemUI/NotificationManager bình thường (PendingIntent tự mang quyền gọi, KHÔNG cần export), chỉ
+             chặn app KHÁC tự ý gọi thẳng receiver này qua Intent tường minh. Xem ReplyReceiver.java. -->
+        <receiver android:name=".ReplyReceiver" android:exported="false" />
+
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+
+    <!-- Permissions -->
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- SigMa (27/7) — quét QR kết bạn thật (@capacitor-mlkit/barcode-scanning), xem MyQrScreen.tsx. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- THƯ VIỆN ẢNH (Admin Demo 12/8 "chưa vào được thư viện ảnh") — Camera plugin CameraSource.Photos (chọn ảnh từ
+         thư viện) cần quyền đọc media. Android 13+ (API 33+): READ_MEDIA_IMAGES. Android ≤12: READ_EXTERNAL_STORAGE
+         (maxSdkVersion 32, Android 13+ bỏ dùng storage cũ). Không có 2 quyền này → mở thư viện ảnh thất bại. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <!-- SIGMA Phase 2 (29/7) — tin nhắn thoại THẬT (lib/voice-recording.ts, MediaRecorder +
+         navigator.mediaDevices.getUserMedia({audio:true})). ĐÃ TỰ VERIFY nguồn thật (đọc source
+         BridgeWebChromeClient.java trên repo chính thức ionic-team/capacitor TRƯỚC khi thêm 2 dòng dưới đây,
+         xem voice-recording.README-verify.md) — Capacitor's WebChromeClient.onPermissionRequest() TỰ ĐỘNG map
+         WebView resource "android.webkit.resource.AUDIO_CAPTURE" (getUserMedia audio) sang ĐÚNG 2 quyền native
+         runtime này rồi tự xin phép qua ActivityCompat khi JS gọi getUserMedia — KHÔNG cần override
+         onPermissionRequest tay trong MainActivity.java, NHƯNG bắt buộc khai báo ở đây TRƯỚC (Android chặn
+         request runtime permission nếu chưa khai trong manifest, dù Capacitor có tự xin cỡ nào). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- 4/8 (Admin Demo báo thiếu quyền lần đầu) — Android 13+ (targetSdk 33+) BẮT BUỘC POST_NOTIFICATIONS runtime
+         mới hiện được thông báo. App dùng FCM push (@capacitor/push-notifications) cho cuộc gọi/tin nhắn đến →
+         thiếu quyền này thì Android 13+ KHÔNG hỏi + KHÔNG hiện push. (CAMERA + RECORD_AUDIO đã khai ở trên;
+         KHÔNG thêm LOCATION/READ_CONTACTS vì app không đọc GPS/danh bạ điện thoại — tránh Google Play từ chối.) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Việc #5 (6/8, Admin Demo "APK tự cập nhật — ưu tiên tối cao") — APK sideload (ngoài Play) tự tải+cài bản mới.
+         REQUEST_INSTALL_PACKAGES cho phép app bắn Intent CÀI APK đã tải (người dùng vẫn phải xác nhận + bật "cài
+         từ nguồn này" 1 lần). Xem ApkUpdatePlugin.java. KHÔNG cần quyền storage (tải vào getExternalFilesDir riêng). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+</manifest>

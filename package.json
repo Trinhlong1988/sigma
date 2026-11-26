@@ -1,0 +1,52 @@
+{
+  "name": "sigma",
+  "version": "0.2.89",
+  "private": true,
+  "description": "SigMa — rebrand clone of Quản Lý GLB (IMS), backing the SigMa product. Shares the same production Postgres database `glb` as the original app.",
+  "workspaces": [
+    "packages/shared",
+    "packages/business-rules",
+    "packages/database",
+    "packages/services",
+    "apps/desktop",
+    "apps/bot-api",
+    "apps/web-demo",
+    "apps/mobile"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @sigma/desktop",
+    "build": "npm run build --workspace @sigma/desktop",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "brand:sync": "python scripts/brand_sync.py",
+    "brand:sync:android": "python scripts/brand_sync.py --android",
+    "typecheck": "npm run typecheck --workspace @sigma/desktop",
+    "audit:protected": "node tools/audit/protected_artifacts_guard.mjs",
+    "audit:deferred": "node tools/audit/deferred_guard.mjs",
+    "verify": "npm run typecheck && npm run audit:protected && npm run audit:deferred && npm run test",
+    "selftest": "node tools/selftest/run-selftest-pg.mjs",
+    "selftest:bill": "node tools/selftest/run-selftest-pg.mjs 44",
+    "selftest:core": "node tools/selftest/run-selftest-pg.mjs 2 15 44",
+    "db:generate": "npm run generate --workspace @sigma/database",
+    "db:migrate": "npm run migrate --workspace @sigma/database",
+    "db:seed": "npm run seed --workspace @sigma/database",
+    "db:reset": "npm run reset --workspace @sigma/database",
+    "db:setup": "npm run generate --workspace @sigma/database && npm run migrate --workspace @sigma/database && npm run seed --workspace @sigma/database"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "archiver": "^8.0.0",
+    "uuid": "11.1.1",
+    "find-my-way": "^9.7.0",
+    "valibot": "^1.4.2",
+    "brace-expansion": "^5.0.8"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

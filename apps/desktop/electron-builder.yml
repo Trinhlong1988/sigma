@@ -1,0 +1,86 @@
+# electron-builder — G10 (.exe packaging) trên PostgreSQL (pg pure-JS, KHÔNG native addon).
+# Generator Prisma = prisma-client (queryCompiler): KHÔNG có query-engine binary.
+# - Generated client + pg query-compiler wasm (base64) đã được electron-vite BUNDLE vào out/main
+#   (chunk query_compiler_fast_bg.postgresql.wasm-base64-*.js) → nằm trong asar, load bằng WebAssembly
+#   từ base64 (không đọc file) nên KHÔNG cần asarUnpack.
+# - Runtime external cần trong node_modules: @prisma/adapter-pg, @prisma/client, pg
+#   (đều pure-JS → chạy trực tiếp từ asar, KHÔNG cần asarUnpack native).
+appId: com.sigma.app
+productName: SigMa
+# electron hoisted lên node_modules gốc (monorepo) + devDep khai báo dạng range "^33.2.0"
+# → electron-builder 26 không tự suy ra được exact version. Ghim theo bản ĐANG cài (verified 33.4.11).
+electronVersion: 33.4.11
+
+directories:
+  output: dist
+  buildResources: build
+
+# App code đã được electron-vite bundle vào out/. node_modules production deps
+# (pg, @prisma/*) được electron-builder tự thu thập theo dependency graph
+# (kể cả khi hoisted lên node_modules gốc của monorepo npm workspaces).
+files:
+  - out/**/*
+  - package.json
+  # Client KHÔNG dùng DB local (G10 model A: nối thẳng Postgres máy chủ) — không gói file DB.
+  - "!**/*.db"
+  - "!**/*.db.*"
+  - "!**/*.map"
+
+# pg + Prisma client đều pure-JS (không native .node) → KHÔNG cần asarUnpack.
+
+# Bill giải trình — template hóa đơn MẶC ĐỊNH đóng gói kèm app (đọc lúc runtime qua process.resourcesPath).
+# Tên ASCII (billexplain-template.xlsx) tránh lỗi phi-ASCII khi gói. User có thể import mẫu riêng (lưu userData).
+extraResources:
+  # Icon shield chuẩn để BrowserWindow đặt icon cửa sổ/taskbar lúc runtime (đồng bộ icon bản chuẩn — Admin Demo 16/7).
+  - from: build/icon.ico
+    to: icon.ico
+  - from: build/billexplain-template.xlsx
+    to: billexplain-template.xlsx
+  # Thư viện SP gốc từ renbill (5 ngành + 199 SP Siêu thị thật) — seed 1 lần/DB lúc boot máy chủ.
+  - from: build/billexplain-seed.json
+    to: billexplain-seed.json
+  # Config máy chủ MẶC ĐỊNH (Admin Demo 3/8 "tích hợp luôn, chỉ cài + đăng nhập") — client tự nối, không nhập IP/mật khẩu tay.
+  - from: build/server-config.default.json
+    to: server-config.default.json
+
+win:
+  target:
+    - nsis
+  # R42 — icon app (cửa sổ + taskbar + exe) = logo SigMa THẬT (alpha-logo.webp) trên nền sáng bo góc,
+  # sinh bởi build/gen-brand-assets.mjs (3/8 — thay icon vector cũ, tone brand #0579cc khớp app chat).
+  icon: build/icon.ico
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  # [M1] Tên file ASCII: tránh tên phi-ASCII dễ gãy khi electron-updater tải qua HTTP.
+  # latest.yml sẽ tham chiếu tên ASCII này (giữ productName để hiển thị).
+  artifactName: alpha-${version}-setup.${ext}
+  # R42 — bộ cài đồng bộ nhận diện sigma: icon + ảnh header/sidebar xanh + tiếng Việt.
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/installerHeaderIcon.ico
+  installerHeader: build/installerHeader.bmp
+  installerSidebar: build/installerSidebar.bmp
+  uninstallerSidebar: build/installerSidebar.bmp
+  # R42 fix (Admin Demo 12/7): NSIS wizard chrome (Back/Next/Install/Completing) VẪN tiếng Anh vì
+  # electron-builder khi multiLanguageInstaller:false ÉP langs=["en_US"] (bỏ qua installerLanguages —
+  # xem app-builder-lib/out/targets/nsis/nsisLang.js:17-28). Để bộ cài TIẾNG VIỆT: multiLanguageInstaller=true
+  # với DUY NHẤT 1 ngôn ngữ vi_VN → MUI_LANGUAGE "Vietnamese"; chỉ 1 ngôn ngữ nên NSIS KHÔNG hiện hộp chọn.
+  installerLanguages:
+    - vi_VN
+  multiLanguageInstaller: true
+  runAfterFinish: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: SigMa
+
+# G11 — Feed cập nhật qua Cloudflare Tunnel (electron-updater). RIÊNG SigMa: HTTP tĩnh cổng 8687 (<UPDATES_DIR>\)
+# được cloudflared (Windows service) publish ra HTTPS công khai alpha-update.example.com/updates/ — TÁCH HẲN feed GLB
+# (8686 / <UPDATES_DIR> / glb-update.example.com) để KHÔNG va chạm bản cập nhật trên cùng máy chủ 127.0.0.1.
+# DB đi đường riêng qua Cloudflare Access (không lộ). quitAndInstall(true,…) /S → tự cập nhật cài IM.
+publish:
+  provider: generic
+  url: https://alpha-update.example.com/updates/  # feed RIÊNG SigMa (<UPDATES_DIR> cổng 8687 → Cloudflare tunnel), TÁCH khỏi glb-update.example.com (Admin Demo chốt domain example 3/8)
+  channel: latest

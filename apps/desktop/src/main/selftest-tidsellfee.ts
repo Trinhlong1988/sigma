@@ -1,0 +1,162 @@
+// R30 — Phí bán THỰC TẾ theo TID × loại thẻ — self-test (SIGMA_SELFTEST=33). Số thật, real service, DB throwaway.
+// Phủ: niêm yết mặc định (không override) · set override → doanh thu ưu tiên phí thực tế · phí cài máy vẫn từ
+// FeeRate · xóa override → về niêm yết · validate loại thẻ đúng ngân hàng · validate 0–100% · list đối chiếu ·
+// B86-2 (audit fix): rule phí bán ≥ phí mua PHẢI LUÔN CHẠY — TID chưa gắn đối tác / chưa có FeeRate hiệu lực
+// đều bị CHẶN rõ ràng khi set phí bán (không im lặng bỏ qua).
+import { login, logout } from './auth-service.js';
+import { getDb } from './db.js';
+import { createTransaction } from './transaction-service.js';
+import { listTidSellFees, setTidSellFees } from './tid-sell-fee-service.js';
+
+let pass = 0,
+  fail = 0;
+function ok(name: string, cond: boolean, extra?: unknown): void {
+  if (cond) pass++;
+  else fail++;
+  // eslint-disable-next-line no-console
+  console.log(`TIDSELLFEE33 ${cond ? 'PASS' : 'FAIL'} | ${name}` + (extra !== undefined ? ' | ' + JSON.stringify(extra) : ''));
+}
+const ADMIN_PW = 'Admin@123456';
+
+export async function runTidSellFeeSelfTest(): Promise<number> {
+  const db = getDb();
+  await login('adminroot', ADMIN_PW);
+
+  // ═══ SETUP: 2 ngân hàng, thẻ, đối tác, biểu phí niêm yết, TID ═══
+  const bank = await db.bank.create({ data: { name: 'NH Phí Bán', code: 'SFBANK' } });
+  const bankOther = await db.bank.create({ data: { name: 'NH Khác', code: 'SFOTHER' } });
+  const card1 = await db.cardType.create({ data: { name: 'Visa SF', code: 'SFV', bankId: bank.id } });
+  const card2 = await db.cardType.create({ data: { name: 'Master SF', code: 'SFM', bankId: bank.id } });
+  const cardOther = await db.cardType.create({ data: { name: 'Napas Khác', code: 'SFNO', bankId: bankOther.id } });
+  const partner = await db.partner.create({ data: { name: 'Đối tác Phí Bán', code: 'SFP' } });
+  await db.partnerBank.create({ data: { partnerId: partner.id, bankId: bank.id } });
+  // FEE_TYPE — 2 loại phí: A (Ủy quyền) dùng cho khối chính; B (Tiền chờ) cho ca "2 loại phí khác giá".
+  const feeTypeA = await db.feeType.create({ data: { name: 'Ủy quyền SF' } });
+  const feeTypeB = await db.feeType.create({ data: { name: 'Tiền chờ SF' } });
+  // FEE_MODEL — phí mua/cài CỐ ĐỊNH cho card1 (phiMua 3.0 / phiCài 1.0 → CL_NCC=2000), KHÔNG theo loại phí.
+  await db.feeRate.create({ data: { partnerId: partner.id, cardTypeId: card1.id, phiMua: 3000, phiCaiMay: 1000, effectiveFrom: new Date('1970-01-01T00:00:00.000Z') } });
+  // Phí bán niêm yết loại phí A (card1) = 2.5% → CL_KH niêm yết=1500.
+  await db.feeSellQuote.create({ data: { partnerId: partner.id, cardTypeId: card1.id, feeTypeId: feeTypeA.id, phiBan: 2500, effectiveFrom: new Date('1970-01-01T00:00:00.000Z') } });
+  // Phí bán niêm yết loại phí B (card1) = 3.5% (KHÁC loại phí A — loại phí CHỈ đổi phí bán) → CL_KH niêm yết=2500.
+  await db.feeSellQuote.create({ data: { partnerId: partner.id, cardTypeId: card1.id, feeTypeId: feeTypeB.id, phiBan: 3500, effectiveFrom: new Date('1970-01-01T00:00:00.000Z') } });
+  const cust = await db.customer.create({ data: { code: 'KHSF', fullName: 'Khách Phí Bán', nickname: 'KSF' } });
+  const tid = await db.tid.create({ data: { tid: 'TIDSF', mid: 'MIDSF', hkdName: 'HKD Phí Bán', bankId: bank.id, partnerId: partner.id, customerId: cust.id } });
+
+  const mkTxn = async (feeTypeId: number = feeTypeA.id): Promise<number> => {
+    const c = await createTransaction({ tidId: tid.id, cardTypeId: card1.id, feeTypeId, amount: 10_000_000, txnDate: '2026-07-01T00:00:00.000Z' });
+    if (!c.ok || !c.id) throw new Error('mkTxn thất bại: ' + JSON.stringify(c));
+    return c.id;
+  };
+
+  // ═══ 1) CHƯA override → dùng phí bán NIÊM YẾT ═══
+  const t1 = await mkTxn();
+  const t1row = await db.transaction.findUnique({ where: { id: t1 } });
+  ok('chưa override: sellMarginMilli = phiBan−phiCaiMay niêm yết (2500−1000=1500)', t1row?.sellMarginMilli === 1500, { got: t1row?.sellMarginMilli });
+  ok('chưa override: partnerMarginMilli = phiMua−phiCaiMay (3000−1000=2000)', t1row?.partnerMarginMilli === 2000, { got: t1row?.partnerMarginMilli });
+
+  // ═══ 2) LIST đối chiếu: card1 có niêm yết 2.5, card2 chưa có biểu phí (null), chưa override ═══
+  const list1 = await listTidSellFees(tid.id, feeTypeA.id);
+  const r1c1 = list1.data?.rows.find((r) => r.cardTypeId === card1.id);
+  const r1c2 = list1.data?.rows.find((r) => r.cardTypeId === card2.id);
+  ok('list: 2 loại thẻ của ngân hàng TID', list1.ok && list1.data?.rows.length === 2, list1.data?.rows.map((r) => r.cardTypeCode));
+  ok('list: card1 niêm yết 2.5, thực tế null', r1c1?.phiBanNiemYet === 2.5 && r1c1?.phiBanThucTe === null, r1c1);
+  ok('list: card2 chưa có biểu phí → niêm yết null', r1c2?.phiBanNiemYet === null, r1c2);
+  // #6 — phí MUA niêm yết trả từ FeeRate hiệu lực (card1 phiMua 3000 → 3.0%); card2 chưa có FeeRate → null.
+  ok('list: card1 phí MUA niêm yết = 3.0 (từ FeeRate)', r1c1?.phiMuaNiemYet === 3.0, { got: r1c1?.phiMuaNiemYet });
+  ok('list: card1 phí cài máy niêm yết = 1.0 (từ FeeRate)', r1c1?.phiCaiMayNiemYet === 1.0, { got: r1c1?.phiCaiMayNiemYet });
+  ok('list: card2 chưa có FeeRate → phí MUA niêm yết null', r1c2?.phiMuaNiemYet === null, { got: r1c2?.phiMuaNiemYet });
+
+  // ═══ 3) SET override card1 = 3.2% (≥ phiMua 3.0, B86) → doanh thu ưu tiên phí thực tế ═══
+  const set1 = await setTidSellFees({ tidId: tid.id, feeTypeId: feeTypeA.id, entries: [{ cardTypeId: card1.id, phiBan: 3.2 }] });
+  ok('set override card1 = 3.2% → ok', set1.ok === true, set1);
+  const list2 = await listTidSellFees(tid.id, feeTypeA.id);
+  const r2c1 = list2.data?.rows.find((r) => r.cardTypeId === card1.id);
+  ok('list sau set: card1 thực tế 3.2, niêm yết vẫn 2.5', r2c1?.phiBanThucTe === 3.2 && r2c1?.phiBanNiemYet === 2.5, r2c1);
+  const t2 = await mkTxn();
+  const t2row = await db.transaction.findUnique({ where: { id: t2 } });
+  ok('có override: sellMarginMilli = override−phiCaiMay (3200−1000=2200)', t2row?.sellMarginMilli === 2200, { got: t2row?.sellMarginMilli });
+  ok('có override: partnerMarginMilli KHÔNG đổi (vẫn 2000)', t2row?.partnerMarginMilli === 2000, { got: t2row?.partnerMarginMilli });
+  // B86 — override THẤP HƠN phí mua (2.0% < 3.0%) phải bị chặn (bán lỗ), dù ≥ phí cài máy 1.0%.
+  const loss = await setTidSellFees({ tidId: tid.id, feeTypeId: feeTypeA.id, entries: [{ cardTypeId: card1.id, phiBan: 2.0 }] });
+  ok('set override < phí mua → VALIDATION (bán lỗ)', loss.ok === false && loss.error === 'VALIDATION', loss);
+
+  // ═══ 4) XÓA override (null) → về niêm yết ═══
+  const clr = await setTidSellFees({ tidId: tid.id, feeTypeId: feeTypeA.id, entries: [{ cardTypeId: card1.id, phiBan: null }] });
+  ok('xóa override → ok', clr.ok === true, clr);
+  const t3 = await mkTxn();
+  const t3row = await db.transaction.findUnique({ where: { id: t3 } });
+  ok('sau xóa override: sellMarginMilli về niêm yết 1500', t3row?.sellMarginMilli === 1500, { got: t3row?.sellMarginMilli });
+  const list3 = await listTidSellFees(tid.id, feeTypeA.id);
+  const r3c1 = list3.data?.rows.find((r) => r.cardTypeId === card1.id);
+  ok('list sau xóa: card1 thực tế null', r3c1?.phiBanThucTe === null, r3c1);
+
+  // ═══ 5) VALIDATE: loại thẻ khác ngân hàng → CARD_BANK_MISMATCH; phí ngoài 0–100 → VALIDATION ═══
+  const mismatch = await setTidSellFees({ tidId: tid.id, feeTypeId: feeTypeA.id, entries: [{ cardTypeId: cardOther.id, phiBan: 1.5 }] });
+  // [B209 19/11 — Admin Demo "kể cả thẻ khác bank khác"] LUẬT ĐỔI: KHÔNG còn chặn thẻ khác ngân hàng.
+  ok('set thẻ khác ngân hàng KHÔNG còn bị chặn vì khác ngân hàng', mismatch.error !== 'CARD_BANK_MISMATCH', mismatch);
+  const tooHigh = await setTidSellFees({ tidId: tid.id, feeTypeId: feeTypeA.id, entries: [{ cardTypeId: card1.id, phiBan: 150 }] });
+  ok('set phí 150% → VALIDATION', tooHigh.ok === false && tooHigh.error === 'VALIDATION', tooHigh);
+  // Sau 2 lệnh lỗi, override card1 vẫn KHÔNG bị tạo (đã xóa ở bước 4).
+  const list4 = await listTidSellFees(tid.id, feeTypeA.id);
+  const r4c1 = list4.data?.rows.find((r) => r.cardTypeId === card1.id);
+  ok('lệnh lỗi không ghi override', r4c1?.phiBanThucTe === null, r4c1);
+
+  // ═══ 6) BACKSTOP TƯƠNG TRANH (audit đợt 4): partial-unique 1 override CÒN SỐNG / (tid,thẻ) ═══
+  const idx = await db.$queryRawUnsafe<{ indexname: string }[]>(
+    `SELECT indexname FROM pg_indexes WHERE tablename='tid_sell_fees' AND indexname='tid_sell_fees_active_uq'`
+  );
+  ok('tồn tại partial-unique index tid_sell_fees_active_uq', Array.isArray(idx) && idx.length === 1, idx);
+  // Tạo 1 override hợp lệ (≥ phí mua 3.0, B86) rồi cố CHÈN THẲNG dòng active trùng (tid,thẻ) → phải bị index chặn (P2002/23505).
+  await setTidSellFees({ tidId: tid.id, feeTypeId: feeTypeA.id, entries: [{ cardTypeId: card1.id, phiBan: 3.2 }] });
+  let dupBlocked = false;
+  try {
+    await db.tidSellFee.create({ data: { tidId: tid.id, cardTypeId: card1.id, feeTypeId: feeTypeA.id, phiBan: 1900, createdBy: 1, updatedBy: 1 } });
+  } catch {
+    dupBlocked = true;
+  }
+  ok('chèn thẳng dòng override active trùng → bị index chặn', dupBlocked);
+  const actives = await db.tidSellFee.count({ where: { tidId: tid.id, cardTypeId: card1.id, deletedAt: null } });
+  ok('chỉ 1 override CÒN SỐNG / (tid,thẻ)', actives === 1, { actives });
+
+  // ═══ 7) FEE_TYPE — override phí bán TÁCH theo LOẠI PHÍ: cùng (tid,thẻ) khác loại phí → override ĐỘC LẬP ═══
+  // Đang có override loại phí A card1 = 2.0% (bước 6). Set override loại phí B card1 = 3.0% (khác) → phải
+  // tồn tại SONG SONG (partial-unique có thêm fee_type_id, không đụng nhau). GD loại phí B ăn override B.
+  const setB = await setTidSellFees({ tidId: tid.id, feeTypeId: feeTypeB.id, entries: [{ cardTypeId: card1.id, phiBan: 3.0 }] });
+  ok('set override loại phí B card1 = 3.0% → ok (song song với override loại phí A)', setB.ok === true, setB);
+  const activesA = await db.tidSellFee.count({ where: { tidId: tid.id, cardTypeId: card1.id, feeTypeId: feeTypeA.id, deletedAt: null } });
+  const activesB = await db.tidSellFee.count({ where: { tidId: tid.id, cardTypeId: card1.id, feeTypeId: feeTypeB.id, deletedAt: null } });
+  ok('2 override cùng (tid,thẻ) khác loại phí cùng sống (A=1, B=1)', activesA === 1 && activesB === 1, { activesA, activesB });
+  const listB = await listTidSellFees(tid.id, feeTypeB.id);
+  const rBc1 = listB.data?.rows.find((r) => r.cardTypeId === card1.id);
+  ok('list loại phí B: niêm yết 3.5, thực tế 3.0 (độc lập với loại phí A)', rBc1?.phiBanNiemYet === 3.5 && rBc1?.phiBanThucTe === 3.0, rBc1);
+  // FEE_MODEL — CL_NCC = phiMua−phiCài = 2000 (CỐ ĐỊNH, GIỐNG loại phí A); CL_KH = override 3000 − phiCài 1000 = 2000.
+  const tB = await mkTxn(feeTypeB.id);
+  const tBrow = await db.transaction.findUnique({ where: { id: tB } });
+  ok('GD loại phí B: partnerMarginMilli = 2000 (phí mua/cài CỐ ĐỊNH, GIỐNG loại phí A)', tBrow?.partnerMarginMilli === 2000, { got: tBrow?.partnerMarginMilli });
+  ok('GD loại phí B: sellMarginMilli = override B 3000 − 1000 = 2000', tBrow?.sellMarginMilli === 2000, { got: tBrow?.sellMarginMilli });
+  ok('GD loại phí B: lưu đúng feeTypeId B', tBrow?.feeTypeId === feeTypeB.id, { got: tBrow?.feeTypeId });
+
+  // ═══ 8) B86-2 (audit fix) — rule so sánh phí bán ≥ phí mua PHẢI LUÔN CHẠY, không được im lặng bỏ qua ═══
+  // 8a) TID CHƯA gắn đối tác (partnerId null) → set phiBan bất kỳ phải bị CHẶN rõ ràng (trước đây lọt qua tự do).
+  const tidNoPartner = await db.tid.create({ data: { tid: 'TIDSF_NOPARTNER', mid: 'MIDSFNP', hkdName: 'HKD Chưa Đối Tác', bankId: bank.id, partnerId: null, customerId: cust.id } });
+  const setNoPartner = await setTidSellFees({ tidId: tidNoPartner.id, feeTypeId: feeTypeA.id, entries: [{ cardTypeId: card2.id, phiBan: 5 }] });
+  ok(
+    'TID chưa gắn đối tác → set phí bán bị CHẶN (không im lặng cho qua)',
+    setNoPartner.ok === false && setNoPartner.error === 'VALIDATION' && !!setNoPartner.message?.includes('chưa gắn đối tác'),
+    setNoPartner
+  );
+  // 8b) TID CÓ đối tác nhưng KHÔNG có FeeRate hiệu lực cho cặp (đối tác × thẻ) này (card2 chưa từng được seed FeeRate)
+  // → set phiBan cũng phải bị CHẶN rõ ràng (trước đây `rate` undefined → âm thầm bỏ qua, cho lưu tự do).
+  const tidNoRate = await db.tid.create({ data: { tid: 'TIDSF_NORATE', mid: 'MIDSFNR', hkdName: 'HKD Chưa Biểu Phí', bankId: bank.id, partnerId: partner.id, customerId: cust.id } });
+  const setNoRate = await setTidSellFees({ tidId: tidNoRate.id, feeTypeId: feeTypeA.id, entries: [{ cardTypeId: card2.id, phiBan: 5 }] });
+  ok(
+    'TID có đối tác nhưng chưa cấu hình FeeRate cho thẻ này → set phí bán bị CHẶN (không im lặng cho qua)',
+    setNoRate.ok === false && setNoRate.error === 'VALIDATION' && !!setNoRate.message?.includes('Chưa cấu hình phí mua'),
+    setNoRate
+  );
+
+  await logout();
+  // eslint-disable-next-line no-console
+  console.log(`TIDSELLFEE33 SUMMARY | pass=${pass} fail=${fail}`);
+  return fail === 0 ? 0 : 1;
+}

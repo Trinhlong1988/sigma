@@ -1,0 +1,2287 @@
+// Quản Lý GLB — IMS G1 schema (IMS_SPEC §18). 9 bảng.
+// SQLite local (G1) → PostgreSQL VPS (G10): giữ nguyên model, chỉ đổi provider + url.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                  Int       @id @default(autoincrement())
+  employeeCode        String?   @unique @map("employee_code") // mã NV (§D) — NV01, NV02...
+  fullName            String    @map("full_name")
+  birthDate           DateTime? @map("birth_date")
+  gender              String?
+  phone               String?
+  email               String?   @unique
+  address             String?
+  joinDate            DateTime? @map("join_date")
+  username            String    @unique
+  passwordHash        String    @map("password_hash")
+  status              String    @default("ACTIVE") // ACTIVE|PENDING|LOCKED|DISABLED|DELETED
+  forceChangePassword Boolean   @default(false) @map("force_change_password")
+  failedAttempts      Int       @default(0) @map("failed_attempts") // đếm mọi lần xác thực SAI (đăng nhập/đổi mật khẩu/pass cấp 2). ≥5 → tự khóa
+  lockedAt            DateTime? @map("locked_at") @db.Timestamptz(3) // mỏ neo TỰ-MỞ-KHÓA cho khóa-tạm (AUTH_FAILURE); null với khóa tay
+  lockReason          String?   @map("lock_reason") // P0-01: LÝ DO khóa — AUTH_FAILURE (tự khóa sai mật khẩu, tự mở sau cooldown) | ADMIN_LOCK (admin khóa tay, KHÔNG tự mở). Mở rộng: SECURITY_HOLD | EMPLOYMENT_ENDED
+  level2Hash          String?   @map("level2_hash") // băm bcrypt (cost cao) mật khẩu CẤP 2 — chỉ Admin/Manager đặt; dùng cho xóa vĩnh viễn
+  level2SetAt         DateTime? @map("level2_set_at") @db.Timestamptz(3)
+  createdBy           Int?      @map("created_by")
+  // TÀI KHOẢN CON của Nhà đầu tư (Admin Demo 12/8): user role R_INVESTOR do 1 NĐT tạo để CHIA SẺ quyền xem báo cáo
+  // CỦA NĐT ĐÓ. Trỏ tới Investor.id (scalar, KHÔNG hard FK — Investor cũng chỉ scalar userId). null = user thường /
+  // chủ NĐT. resolveOwnInvestorId đọc cột này để ép data-scope con về đúng NĐT cha.
+  investorId          Int?      @map("investor_id")
+  // KẾ TOÁN NĐT (Admin Demo 24/11): cột `scope_investor_id` (NĐT mà user bị KHÓA PHẠM VI) KHÔNG khai ở đây — quản
+  // IDEMPOTENT bằng schema-ensure (ALTER TABLE users ADD COLUMN IF NOT EXISTS) + TRUY CẬP BẰNG RAW SQL, đúng lệ
+  // can_refund/void_amount (tránh prisma generate trên server + chống drift schema↔migrations ở schema-drift-guard).
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt           DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  roles     UserRole[]
+  auditLogs AuditLog[]     @relation("actor")
+  sessions  LoginSession[]
+
+  @@index([investorId])
+  @@map("users")
+}
+
+// Thư nội bộ + thông báo hệ thống (hòm thư dùng chung).
+// kind=SYSTEM (thông báo bảo mật, senderId null) | USER (thư người dùng gửi nhau — Nhóm C).
+model Message {
+  id          Int       @id @default(autoincrement())
+  kind        String    @default("USER") // USER | SYSTEM
+  category    String? // SECURITY_LOCK | SECURITY_RESET | ... (phân loại thông báo hệ thống)
+  subject     String
+  body        String
+  senderId    Int?      @map("sender_id") // null = hệ thống
+  recipientId Int       @map("recipient_id")
+  readAt      DateTime? @map("read_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  @@index([recipientId, deletedAt])
+  @@map("messages")
+}
+
+model Role {
+  id          Int       @id @default(autoincrement())
+  name        String
+  code        String    @unique
+  description String?
+  status      String    @default("ACTIVE") // ACTIVE|LOCKED
+  isSystem    Boolean   @default(false) @map("is_system")
+  createdBy   Int?      @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  name        String
+  description String?
+  group       String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  userId    Int      @map("user_id")
+  roleId    Int      @map("role_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  roleId       Int      @map("role_id")
+  permissionId Int      @map("permission_id")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model AuditLog {
+  id          Int      @id @default(autoincrement())
+  actorUserId Int?     @map("actor_user_id")
+  action      String
+  targetType  String?  @map("target_type")
+  targetId    String?  @map("target_id")
+  beforeJson  String?  @map("before_json")
+  afterJson   String?  @map("after_json")
+  ipAddress   String?  @map("ip_address")
+  deviceInfo  String?  @map("device_info")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  actor User? @relation("actor", fields: [actorUserId], references: [id])
+
+  // FIX-PERF B132 — storage/status đếm AuditLog theo cutoff `createdAt` (>= / <): index để không seq-scan cả bảng
+  // nhật ký (phình liên tục). Migration TAY 20260805120000_perf_indexes (audit_logs_created_at_idx).
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// R48 Pha 4 — realtime: 1 dòng/miền dữ liệu (domain = targetType audit, vd 'Customer'/'Tid'/'Transaction').
+// writeAudit tăng version mỗi thao tác → client poll realtimeTokens(), phát hiện miền của mình đổi → nhắc tải lại.
+// Bảng TÍ HON (~vài chục dòng) → đọc O(1) mãi mãi dù audit log phình (khác GROUP BY audit sẽ chậm dần).
+model ChangeToken {
+  domain    String   @id
+  version   BigInt   @default(0)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("change_tokens")
+}
+
+model AppSetting {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  value     String?
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("app_settings")
+}
+
+model BackupLog {
+  id        Int      @id @default(autoincrement())
+  filePath  String   @map("file_path")
+  fileSize  Int?     @map("file_size")
+  checksum  String?
+  createdBy Int?     @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  note      String?
+
+  @@map("backup_logs")
+}
+
+// R46 (Admin Demo 12/7) — 1 tài khoản chỉ đăng nhập 1 THIẾT BỊ cùng lúc. lastSeenAt = nhịp tim (heartbeat) để
+// phát hiện phiên còn sống (online) + dọn phiên chết; deviceInfo hiển thị "đang đăng nhập ở thiết bị khác".
+model LoginSession {
+  id         String   @id
+  userId     Int      @map("user_id")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz(3)
+  lastSeenAt DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  deviceInfo String?  @map("device_info") // NHÃN hiển thị (hostname) — CÓ THỂ giả mạo, chỉ để hiện.
+  deviceId   String?  @map("device_id") // R48 — GUID/1-cài-đặt (userData), KHÓA nhận diện thiết bị (chống giả mạo hostname).
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("login_sessions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// G-POS.1 — POS/TID asset library (event-sourced) + code counter (§A/§D).
+// Asset tables use scalar id links (no hard FK) to keep the immutable event log
+// resilient to soft-deletes/renames; joins are done in the service layer.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Đại lý (§A2).
+model Agent {
+  id        Int       @id @default(autoincrement())
+  code      String?   @unique
+  name      String
+  region    String?
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy Int?      @map("deleted_by")
+
+  // SIGMA Tier 2 (23/7, CMD_BUILD) — QR nhận tiền của đại lý, để apps/bot-api trả cho bot Rocket.Chat
+  // post kèm bảng kết toán. Lưu BLOB trực tiếp trên hàng Agent (KHÔNG theo FILE_UPLOAD_CONVENTION.md đĩa
+  // cục bộ — bot-api là service riêng, có thể khác máy, cần đọc được mà không chung <userData> với Electron
+  // client đã upload — quyết định của LEAD). Nullable thuần — đại lý chưa cấu hình QR vẫn hoạt động bình thường.
+  qrImage          Bytes?    @map("qr_image")
+  qrImageMime      String?   @map("qr_image_mime") // "image/png" | "image/jpeg" — lấy từ magic-bytes lúc lưu, KHÔNG tin đuôi/mime client gửi
+  bankAccountLabel String?   @map("bank_account_label") // vd "Vietcombank - 0123456789 - NGUYEN VAN A"
+  qrUpdatedAt      DateTime? @map("qr_updated_at") @db.Timestamptz(3)
+
+  // SIGMA (1/8, mục 39 mở rộng — "Hồ sơ của tôi", thay Phase 0 mock đổi màu/gradient cục bộ ở
+  // ProfileScreen.tsx) — avatar + ảnh bìa, CÙNG TIỀN LỆ khối qrImage ngay trên (BLOB thẳng trong hàng Agent,
+  // KHÔNG theo FILE_UPLOAD_CONVENTION.md đĩa cục bộ — lý do y hệt: bot-api có thể khác máy, đọc được mà không
+  // chung <userData> với Electron client). KHÁC qrImage (chỉ chủ sở hữu xem, GET /v1/me/qr) — avatar/cover PHẢI
+  // xem được bởi NGƯỜI KHÁC (bạn bè/thành viên nhóm), xem route GET /v1/agents/:id/avatar (routes/me.ts) đọc
+  // theo :id chứ không theo session người gọi. Nullable thuần — đại lý chưa có ảnh vẫn hoạt động bình thường
+  // (frontend fallback chữ cái đầu tên/gradient demo).
+  avatarImage     Bytes?    @map("avatar_image")
+  avatarImageMime String?   @map("avatar_image_mime") // "image/jpeg" | "image/png" | "image/webp" — từ magic-bytes lúc lưu, KHÔNG tin đuôi/mime client gửi
+  avatarUpdatedAt DateTime? @map("avatar_updated_at") @db.Timestamptz(3)
+  coverImage      Bytes?    @map("cover_image")
+  coverImageMime  String?   @map("cover_image_mime")
+  coverUpdatedAt  DateTime? @map("cover_updated_at") @db.Timestamptz(3)
+
+  // SIGMA Phase 1 (23/7, CMD_BUILD) — link tài khoản Rocket.Chat của đại lý (kế hoạch mục A: đăng nhập
+  // qua RC trước, bot-api chỉ xác minh token qua GET /api/v1/me rồi map sang Agent bằng 2 cột này). Nullable
+  // + unique thuần — Agent CHƯA đăng ký RC vẫn hoạt động bình thường (route Bearer-token cũ không đụng).
+  rcUserId   String? @unique @map("rc_user_id")
+  rcUsername String? @unique @map("rc_username")
+
+  // SIGMA Phase 1+ bước đăng ký mở rộng (24/7, Admin Demo yêu cầu) — email dùng làm định danh đăng nhập
+  // chính (tìm kiếm theo email, mục A0 tương lai) + hồ sơ cơ bản. `email` UNIQUE (đăng ký lần 2 cùng email
+  // phải chặn — dù chưa wiring check này ở route, để sẵn ràng buộc DB). `phone` CHƯA bắt buộc lúc đăng ký
+  // (Admin Demo: "tạm thời số điện thoại chưa bắt buộc sau mới áp dụng") — không đặt NOT NULL.
+  email       String?   @unique
+  gender      String?   // "MALE" | "FEMALE" | "OTHER" — tự do, chưa có catalog cứng
+  dateOfBirth DateTime? @map("date_of_birth") @db.Date
+  phone       String?
+
+  // SIGMA Phase 1 "bỏ Rocket.Chat" (28/7) — tách vai trò xác thực đăng nhập ra khỏi RC: mật khẩu nội bộ
+  // (bcrypt) + đăng nhập Google OAuth thật. RC VẪN tiếp tục làm backend chat (rcUserId/rcUsername GIỮ NGUYÊN,
+  // WebSession.rc* KHÔNG đổi nullability ở Phase này — cầu nối tạm thời, xem BUGS_FIXED.md B37/B47). Nullable
+  // thuần, KHÔNG đụng cột cũ:
+  //   - passwordHash: null = Agent CŨ (đăng ký trước Phase 1, chưa backfill) HOẶC Agent tạo qua Google chưa
+  //     từng tự đặt mật khẩu nội bộ. Backfill tự động lần đầu đăng nhập thành công qua đường RC fallback (xem
+  //     routes/auth.ts checkAgentPassword()).
+  //   - googleId: claim "sub" của Google ID token (định danh vĩnh viễn, KHÔNG đổi khi email đổi) — UNIQUE,
+  //     null = chưa từng đăng nhập Google.
+  passwordHash String? @map("password_hash")
+  googleId     String? @unique @map("google_id")
+
+  // SIGMA Phase 3+ (25/7, Admin Demo yêu cầu) — Xóa tài khoản có 48h ÂN HẠN: đại lý tự bấm "Xóa tài khoản"
+  // → set cột này = thời điểm bấm (KHÔNG xóa ngay) → trong 48h vẫn đăng nhập/hủy yêu cầu bình thường → sau
+  // ĐÚNG 48h, lần đăng nhập kế tiếp mới thực sự xóa (deletedAt/deletedBy có sẵn ở trên — TÁI DÙNG, không thêm
+  // cột mới). NULL = không có yêu cầu xóa nào đang treo (trạng thái bình thường/đã hủy). Xem
+  // apps/bot-api/src/deletion-service.ts cho quyết định thiết kế "lazy deletion" (không có cron trong dự án).
+  deletionRequestedAt DateTime? @map("deletion_requested_at") @db.Timestamptz(3)
+
+  // SIGMA (1/8, mục 32 "Sao lưu, đồng bộ" — Admin Demo chốt hướng KHÁC Zalo: server ĐÃ lưu vĩnh viễn mọi tin
+  // nhắn, tính năng này CHỈ xuất lịch sử chat CỦA MÌNH ra 1 file JSON rồi đẩy lên Google Drive CÁ NHÂN của họ —
+  // bản sao độc lập ngoài app, KHÔNG phải disaster-recovery). Luồng OAuth Authorization Code HOÀN TOÀN KHÁC
+  // googleId ở trên (đăng nhập, ID-token thuần KHÔNG xin quyền gì) — cần refresh_token thật để backend gọi lại
+  // Drive API nhiều lần không phải xin quyền lại mỗi lần, xem drive-backup-service.ts.
+  //   - googleDriveRefreshToken: MÃ HOÁ (AES-256-GCM, khoá DRIVE_TOKEN_ENC_KEY, xem encryptRefreshToken() ở
+  //     drive-backup-service.ts) — KHÔNG hash một chiều như passwordHash vì PHẢI giải mã lại được để gọi Drive
+  //     API. NỢ KỸ THUẬT LEAD CẦN CÂN NHẮC ĐỢT SAU (ghi rõ trong báo cáo build): khoá mã hoá hiện ở dạng biến
+  //     môi trường phẳng trên cùng máy chủ DB — chưa dùng KMS/HSM riêng, chấp nhận được cho quy mô hiện tại
+  //     nhưng chưa phải chuẩn "secret tách biệt khỏi nơi lưu ciphertext" lý tưởng. Route API TUYỆT ĐỐI KHÔNG
+  //     BAO GIỜ trả cột này ra ngoài (xem routes/me.ts GET /v1/me/drive-backup/status chỉ trả boolean connected).
+  //   - googleDriveLastBackupAt: mốc backup THÀNH CÔNG gần nhất (upload Drive xong mới set) — null = chưa từng
+  //     backup. Nullable thuần, KHÔNG bắt buộc — Agent chưa kết nối Drive vẫn hoạt động bình thường.
+  googleDriveRefreshToken String?   @map("google_drive_refresh_token")
+  googleDriveLastBackupAt DateTime? @map("google_drive_last_backup_at") @db.Timestamptz(3)
+
+  @@map("agents")
+}
+
+// SIGMA Phase 3+ (24/7) — Kết bạn (kế hoạch mục 27): "Rocket.Chat KHÔNG có khái niệm bạn bè sẵn — làm
+// lớp custom". Lưu Ở BOT-API (bảng riêng, KHÔNG dùng custom field RC — RC chỉ dùng làm nền dữ liệu/nhắn tin
+// theo kiến trúc "Phương án B" đã chốt). 1 HÀNG = 1 quan hệ theo 1 CHIỀU tại thời điểm khởi tạo
+// (fromAgentId gửi lời mời → toAgentId) — khi ACCEPTED, CHÍNH hàng này đại diện luôn cho quan hệ 2 chiều
+// (KHÔNG tạo thêm hàng đối xứng — GET /v1/me/friends đọc theo CẢ 2 cột để tìm bạn của 1 agent, xem
+// friend-service.ts).
+// status: PENDING (đang chờ trả lời) | ACCEPTED (đã là bạn) | REJECTED (bị từ chối) | CANCELLED (1 trong 2
+// bên chủ động chấm dứt quan hệ — dùng CHUNG mã này cho cả "thu hồi lời mời đang PENDING" lẫn "hủy kết bạn
+// đã ACCEPTED", tránh phình thêm mã trạng thái cho cùng 1 ý nghĩa "người dùng chủ động kết thúc").
+// Prisma KHÔNG diễn đạt được partial-unique theo CẶP KHÔNG PHÂN BIỆT CHIỀU (LEAST/GREATEST) — CÙNG khuôn
+// "POS #1"/REL-06 (xem comment model Agent/PosDevice) — ràng buộc DB thật nằm ở migration
+// 20260724190000_friend_requests (raw SQL), KHÔNG khai báo được ở đây: unique (LEAST(from,to),
+// GREATEST(from,to)) WHERE status IN ('PENDING','ACCEPTED') — chặn gửi trùng lời mời/kết bạn trùng khi đã
+// có 1 quan hệ ĐANG SỐNG giữa 2 người, nhưng cho phép kết bạn LẠI sau khi đã CANCELLED/REJECTED (lịch sử cũ
+// giữ nguyên, không update đè lên hàng cũ).
+model FriendRequest {
+  id          Int       @id @default(autoincrement())
+  fromAgentId Int       @map("from_agent_id")
+  toAgentId   Int       @map("to_agent_id")
+  status      String    @default("PENDING") // PENDING|ACCEPTED|REJECTED|CANCELLED
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  // acceptedAt (Admin Demo bổ sung 24/7 — badge "Bạn mới" ở ContactsScreen): set ĐÚNG 1 LẦN lúc accept, KHÔNG
+  // dùng updatedAt cho việc này — updatedAt đổi mỗi lần status đổi (vd unfriend sau này cũng bump updatedAt),
+  // dùng updatedAt để tính "mới kết bạn" sẽ SAI khi 1 bạn cũ bị unfriend rồi kết bạn lại (updatedAt mới nhưng
+  // KHÔNG phải mới quen) hoặc khi hàng bị chạm vì lý do khác trong tương lai. Tách field riêng cho đúng nghĩa,
+  // frontend so `acceptedAt` với ngưỡng 5 ngày để hiện badge (xem agent-api-client.ts/ContactsScreen.tsx).
+  acceptedAt  DateTime? @map("accepted_at") @db.Timestamptz(3)
+
+  // Biệt danh (25/7, Admin Demo yêu cầu "đặt tên gợi nhớ cho bạn bè") — quan hệ 1 CHIỀU tuyệt đối (giống Zalo:
+  // TÔI đặt biệt danh CHO 1 người bạn, CHỈ TÔI thấy, KHÔNG đổi tên hiển thị thật của họ, KHÔNG liên quan gì
+  // tới việc họ có đặt biệt danh cho tôi hay không). 2 cột riêng theo VAI TRÒ trên CÙNG 1 hàng (khớp thiết kế
+  // "1 hàng = quan hệ 2 chiều khi ACCEPTED" đã có sẵn — KHÔNG tạo hàng đối xứng mới, xem comment đầu model):
+  // nicknameByFrom = biệt danh mà fromAgentId đặt CHO toAgentId; nicknameByTo = biệt danh mà toAgentId đặt CHO
+  // fromAgentId. null = chưa đặt (hiện tên thật). Chỉ có ý nghĩa khi status=ACCEPTED (đặt/đọc qua
+  // friend-service.ts setFriendNickname/listFriends — service tự xác định meAgentId là from hay to).
+  nicknameByFrom String? @map("nickname_by_from")
+  nicknameByTo   String? @map("nickname_by_to")
+
+  // Chặn cuộc gọi/tin nhắn (25/7, Admin Demo yêu cầu) — CÙNG khuôn nickname (2 cột theo vai trò, 1 CHIỀU tuyệt
+  // đối: fromAgentId chặn toAgentId KHÔNG có nghĩa toAgentId cũng chặn fromAgentId). KHÔNG xóa/đổi status quan
+  // hệ bạn bè (vẫn ACCEPTED) — chỉ đánh dấu cờ, tầng route/UI đọc cờ này để chặn hành động (xem
+  // friend-service.ts setFriendBlock + báo cáo quyết định enforcement). blockedByFrom = fromAgentId ĐÃ CHẶN
+  // toAgentId; blockedByTo = toAgentId ĐÃ CHẶN fromAgentId.
+  blockedByFrom Boolean @default(false) @map("blocked_by_from")
+  blockedByTo   Boolean @default(false) @map("blocked_by_to")
+
+  // Phân loại bạn bè (31/7, Admin Demo yêu cầu "Gia đình"/"Công việc") — CÙNG khuôn nickname/block (2 cột theo
+  // VAI TRÒ trên CÙNG 1 hàng, 1 CHIỀU tuyệt đối): categoryByFrom = phân loại mà fromAgentId gán CHO
+  // toAgentId (chỉ fromAgentId thấy); categoryByTo = phân loại mà toAgentId gán CHO fromAgentId (chỉ
+  // toAgentId thấy) — KHÔNG liên quan gì tới việc người kia phân loại mình là gì. Giá trị hợp lệ
+  // 'FAMILY'|'WORK'|null (null = chưa phân loại) — validate ở TẦNG SERVICE (friend-service.ts
+  // setFriendCategory), String thường KHÔNG CHECK constraint DB, giống cột `status` phía trên. Chỉ có ý
+  // nghĩa khi status=ACCEPTED (đọc/ghi qua setFriendCategory/listFriends).
+  categoryByFrom String? @map("category_by_from")
+  categoryByTo   String? @map("category_by_to")
+
+  @@index([fromAgentId])
+  @@index([toAgentId])
+  @@index([status])
+  @@map("friend_requests")
+}
+
+// SIGMA Phase 3 (25/7, Admin Demo chốt "thiết bị mới → OTP; thiết bị cũ đã đăng nhập rồi → chỉ cần mật
+// khẩu") — thiết bị tin cậy. Sau 1 lần đăng nhập/đăng ký ĐÃ qua đủ 2FA-email/OTP đăng ký thật, client được
+// cấp 1 "vé nhớ máy" (token ngẫu nhiên `crypto.randomBytes`, CHỈ lưu HASH SHA-256 ở đây — CÙNG khuôn
+// EmailOtpChallenge.codeHash, KHÔNG bao giờ lưu plaintext). Lần đăng nhập sau trên CÙNG máy, client gửi kèm
+// token này + mật khẩu như thường — bot-api tự xác nhận mật khẩu ĐÚNG qua RC (rcLogin server-side; RC luôn
+// kiểm mật khẩu TRƯỚC khi trả totp-required — đã verify thật, KHÔNG suy đoán) rồi cấp thẳng session
+// (rcCreateLoginTokenForUser), KHÔNG hiện màn nhập OTP nữa — vẫn CẦN đúng mật khẩu, chỉ bỏ bước 2FA-email.
+// KHÔNG dùng Prisma @relation tới Agent (CÙNG lý do FriendRequest — xem comment đầu model đó, các bảng
+// SigMa bolt-on không khai relation hình thức, chỉ agentId Int + index).
+model TrustedDevice {
+  id         Int       @id @default(autoincrement())
+  agentId    Int       @map("agent_id")
+  tokenHash  String    @unique @map("token_hash")
+  label      String? // user-agent rút gọn lúc cấp — CHỈ hiển thị tham khảo, KHÔNG dùng để enforce gì
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz(3)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+
+  @@index([agentId])
+  @@map("trusted_devices")
+}
+
+// SIGMA (26/7) — Cookie-session server-side cho luồng "bot-api làm trung gian toàn bộ RC REST+WebSocket"
+// (giải nợ B9/B11 ghi trong BUGS_FIXED.md: token RC KHÔNG còn lưu localStorage/trả về client — CHỈ tồn tại
+// trong bảng này + RAM server). `id` = giá trị đặt trong cookie httpOnly `sigma_ws` (opaque random cuid,
+// KHÔNG đoán được) — client KHÔNG BAO GIỜ thấy rcAuthToken. KHÔNG dùng Prisma @relation tới Agent (cùng lý do
+// FriendRequest/TrustedDevice — bolt-on, không khai relation hình thức).
+model WebSession {
+  id          String    @id @default(cuid())
+  // 4/8 — LOẠI RC khỏi auth: rcUserId/rcAuthToken NULLABLE. Phiên đăng nhập mới độc lập RC chỉ dựa `agentId`
+  // (session-middleware ưu tiên rcUserId nếu có, fallback agentId). 2 field này chỉ còn dùng cho rc-proxy
+  // (users.info/room.info — mảng đang thay bằng dữ liệu Agent nội bộ) + phiên CŨ tạo trước khi bỏ RC.
+  rcUserId    String?   @map("rc_user_id")
+  rcUsername  String?   @map("rc_username")
+  rcAuthToken String?   @map("rc_auth_token")
+  agentId     Int?      @map("agent_id")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(3)
+  lastUsedAt  DateTime  @default(now()) @map("last_used_at") @db.Timestamptz(3)
+  // 5/8 (Admin Demo "có tên thiết bị như Zalo") — User-Agent thô lúc tạo phiên; parse thành "Chrome · Windows"...
+  // ở listWebSessionsForAgent. ADDITIVE nullable (cột user_agent đã ALTER trên DB production TRƯỚC khi generate).
+  userAgent   String?   @map("user_agent")
+  // #3 (6/8, Admin Demo "đăng nhập máy mới đá phiên CŨ CÙNG NỀN như Zalo") — NỀN của phiên: 'web' | 'exe' | 'apk'.
+  // Client gửi header X-Sigma-Platform lúc đăng nhập; thiếu → server tự suy từ User-Agent (derivePlatform,
+  // web-session-service.ts). Dùng để đá phiên CŨ CÙNG NỀN khi đăng nhập máy mới (revokeOtherSessionsSamePlatform)
+  // — các nền khác KHÔNG bị đá (đa-thiết-bị). ADDITIVE nullable: phiên CŨ = null → effective platform suy từ
+  // userAgent. Migration TAY 20260806120000_websession_platform (cột "platform" text nullable).
+  platform    String?   @map("platform")
+
+  @@index([agentId])
+  @@map("web_sessions")
+}
+
+// Khách hàng / điểm bán (§A2/§D). Mã KH## + nickname bắt buộc ("dễ gọi").
+model Customer {
+  id        Int       @id @default(autoincrement())
+  code      String    @unique // KH01, KH02...
+  fullName  String    @map("full_name") // tên thật
+  nickname  String // biệt danh dễ gọi — BẮT BUỘC (§D)
+  status    String    @default("ACTIVE") // ACTIVE (đang hoạt động) | LOCKED (đã khóa, chặn GD mới) | CANCELLED (đã hủy, ẩn khỏi list mặc định)
+  phone     String?
+  email     String?
+  address   String?
+  agentId   Int?      @map("agent_id")
+  note      String?
+  createdBy Int?      @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy Int?      @map("deleted_by")
+
+  // FIX-PERF B132 — list/count/dashboard KH lọc theo (deletedAt, status) + đại lý (agentId). Trước 0 index →
+  // seq-scan mỗi lần. Migration TAY 20260805120000_perf_indexes (customers_deleted_at_status_idx / _agent_id_idx).
+  @@index([deletedAt, status])
+  @@index([agentId])
+  @@map("customers")
+}
+
+// NHÀ ĐẦU TƯ (Admin Demo 9/8) — mirror Customer. Bỏ tiền ra đối ứng → hưởng lãi = doanh số × %phí đầu tư.
+// investFeeMilli = %phí đầu tư × 1000 (0.1% = 100). userId = user role INVESTOR gắn để login xem báo cáo riêng.
+// Migration TAY 20260809100000_investors + self-heal (db.ts ensureCriticalSchema). Nhóm chat SigMa: InvestorChatGroup.
+model Investor {
+  id             Int       @id @default(autoincrement())
+  code           String    @unique // INV01, INV02...
+  fullName       String    @map("full_name")
+  nickname       String
+  status         String    @default("ACTIVE") // ACTIVE | LOCKED | CANCELLED
+  phone          String?
+  email          String?
+  address        String?
+  investFeeMilli Int       @default(0) @map("invest_fee_milli") // %phí đầu tư ×1000 (0.1%=100)
+  settleFeeMilli Int       @default(0) @map("settle_fee_milli") // %phí cài máy TẤT TOÁN ×1000 (1.06%=1060) — C-2b
+  userId         Int?      @map("user_id") // user role INVESTOR gắn (login xem báo cáo của mình)
+  note           String?
+  createdBy      Int?      @map("created_by")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy      Int?      @map("deleted_by")
+
+  @@index([deletedAt, status])
+  @@map("investors")
+}
+
+// NHÀ ĐẦU TƯ — SỔ TẠM ỨNG VỐN (Phase C-2a, Admin Demo 10/8). NĐT ứng tiền cho SigMa nhiều lần/ngày; mỗi lần = 1 dòng.
+// amount = tiền ứng VND (BigInt/int8, KHÔNG giới hạn giá trị như Transaction.amount). source: MANUAL (nhập tay) |
+// OCR (khớp bill sau — phase sau). Soft-delete + audit. Σ theo kỳ dùng cho C-2b tất toán sau. Scalar link investorId.
+model InvestorAdvance {
+  id          Int       @id @default(autoincrement())
+  investorId  Int       @map("investor_id")
+  amount      BigInt // tiền ứng VND (int8)
+  advanceDate DateTime  @map("advance_date") @db.Timestamptz(3) // ngày ứng
+  source      String    @default("MANUAL") @map("source") // MANUAL | OCR
+  // Chi tiết chuyển khoản (Admin Demo 11/8) — nguồn OCR bill hoặc nhập tay; đều nullable/additive (bản cũ vẫn hợp lệ).
+  senderAccountNumber   String? @map("sender_account_number") // STK người ứng (NĐT chuyển đi)
+  senderName            String? @map("sender_name")           // tên người ứng
+  senderBank            String? @map("sender_bank")           // ngân hàng người ứng
+  receiverAccountNumber String? @map("receiver_account_number") // STK người nhận
+  receiverName          String? @map("receiver_name")           // tên người nhận
+  receiverBank          String? @map("receiver_bank")           // ngân hàng người nhận
+  refNumber   String?   @map("ref_number") // mã GD / số TT trên bill (nguồn OCR) — dedup 1 (investor, ref) 1 lần
+  note        String?
+  createdBy   Int?      @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy   Int?      @map("deleted_by")
+
+  @@index([investorId])
+  @@index([advanceDate])
+  @@map("investor_advances")
+}
+
+// NHÀ ĐẦU TƯ — TÀI KHOẢN CK "đi tiền tạm ứng" (Phase C-2a). Cấu hình STK NĐT chuyển tiền ứng để SAU OCR khớp bill.
+// Giờ CHỈ lưu cấu hình (matching là phase sau). Soft-delete. Scalar link investorId.
+model InvestorBankAccount {
+  id            Int       @id @default(autoincrement())
+  investorId    Int       @map("investor_id")
+  bankName      String?   @map("bank_name")
+  accountNumber String    @map("account_number")
+  accountHolder String?   @map("account_holder")
+  note          String?
+  createdBy     Int?      @map("created_by")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy     Int?      @map("deleted_by")
+
+  @@index([investorId])
+  @@map("investor_bank_accounts")
+}
+
+// Máy POS vật lý — danh tính = serial number bất biến (§A2).
+// PHASE K1 (Q-P1/Q-P4): PosDevice = NGUỒN SỰ THẬT DUY NHẤT của 1 máy. Di trú các cột nhập từ
+// PosIntake sang đây (nullable — không phá dữ liệu cũ). GIỮ cột model/bank text (Q-P4, không xóa ở
+// pha K) + thêm FK posModelId/bankId/supplierId/intakeStatusId. Bổ sung audit + soft-delete như các
+// bảng khác. Link scalar (no hard FK) — nhất quán triết lý event-log ở đầu file.
+model PosDevice {
+  id                Int      @id @default(autoincrement())
+  serial            String   @unique
+  model             String?
+  bank              String?
+  status            String   @default("IN_STOCK") // IN_STOCK|DEPLOYED|IN_REPAIR|DAMAGED|RETIRED
+  currentAgentId    Int?     @map("current_agent_id")
+  currentCustomerId Int?     @map("current_customer_id")
+  currentTid        String?  @map("current_tid")
+  warehouseLoc      String?  @map("warehouse_loc")
+  // Model 1 (Admin Demo 12/7) — KHO VẬT LÝ đang chứa máy, trỏ Danh mục Kho (Warehouse). Chỉ có giá trị khi
+  // máy ở trong kho (IN_STOCK): set khi nhập kho + thu hồi/nhận-sửa về kho; xóa null khi rời kho
+  // (giao khách/bán/thanh lý/hỏng/gửi sửa). Dùng để lọc "máy đang ở kho nào". Scalar (join tại service).
+  warehouseId       Int?     @map("warehouse_id")
+  // #6 (Admin Demo 12/7) — hủy khách giữ máy: true = khách đã hủy nhưng máy CHƯA thu về (còn ở chỗ khách) →
+  // hiện trong danh sách "Cần thu hồi". Đặt false lại khi recall (về kho) / redeploy (giao khách mới).
+  recallPending     Boolean  @default(false) @map("recall_pending")
+  note              String?
+  // ── PHASE K1 §2.1 — cột nhập di trú từ PosIntake (nullable) ──
+  posModelId        Int?      @map("pos_model_id") // FK PosModel (§C7) — thay model text (Q-P4)
+  supplierId        Int?      @map("supplier_id") // NCC nhập gần nhất (§C6)
+  intakeStatusId    Int?      @map("intake_status_id") // trạng thái nhập (§C8a)
+  importPrice       Int?      @map("import_price") // giá nhập gần nhất (VND)
+  importedAt        DateTime? @map("imported_at") @db.Timestamptz(3) // ngày nhập gần nhất
+  bankId            Int?      @map("bank_id") // FK Bank (§C1) — thay bank text (Q-P4)
+  // ── audit + soft-delete (BỔ SUNG — trước đây thiếu) ──
+  createdBy         Int?      @map("created_by")
+  updatedBy         Int?      @map("updated_by")
+  deletedBy         Int?      @map("deleted_by")
+  deletedAt         DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([posModelId])
+  @@index([supplierId])
+  // @@index([warehouseId]) BẮT BUỘC cho KHỚP DB: migration 20260712230000_pos_warehouse tạo index
+  // pos_devices_warehouse_id_idx (lọc "máy đang ở kho nào") — xem 20260802060000_restore_unrelated_drift_from_migrate_dev.
+  @@index([warehouseId])
+  @@map("pos_devices")
+}
+
+// Terminal ID (§A2).
+model Tid {
+  id               Int       @id @default(autoincrement())
+  tid              String    @unique
+  mid              String?
+  bank             String? // legacy text (G-POS.1) — giữ tương thích
+  status           String    @default("UNASSIGNED") // vòng đời vận hành: UNASSIGNED|ACTIVE|DEAD|CLOSED|RECALLED
+  posSerial        String?   @map("pos_serial")
+  customerId       Int?      @map("customer_id")
+  agentId          Int?      @map("agent_id")
+  openedAt         DateTime? @map("opened_at") @db.Timestamptz(3)
+  deliveredAt      DateTime? @map("delivered_at") @db.Timestamptz(3)
+  closedAt         DateTime? @map("closed_at") @db.Timestamptz(3)
+  // ── G-CFG.6 §9 Cấu hình TID (Cách 1: gộp thông tin thương mại vào chính bảng tids) ──
+  bankId           Int?      @map("bank_id") // Ngân hàng (chọn từ danh sách, thay text `bank`)
+  partnerId        Int?      @map("partner_id") // Đối tác → tra biểu phí
+  hkdName          String?   @map("hkd_name") // Tên Hộ Kinh Doanh của máy POS
+  receiveAccountId Int?      @map("receive_account_id") // TK nhận tiền (§8) — TID suy UỶ qua TK này (owy*)
+  // %phí đầu tư OVERRIDE theo TID (×1000 như investor.investFeeMilli; 0.1%=100). null = dùng mặc định của NĐT (uỷ).
+  // Chỉ có ý nghĩa khi TK nhận tiền có owyType='INVESTOR'. Lãi NĐT tính sau (Phase C).
+  investFeeMilli   Int?      @map("invest_fee_milli")
+  issuedAt         DateTime? @map("issued_at") @db.Timestamptz(3) // Ngày cấp TID (§9)
+  configStatusId   Int?      @map("config_status_id") // Trạng thái TID cấu hình (§9a)
+  dossierSourceId  Int?      @map("dossier_source_id") // Nguồn hồ sơ (§10a)
+  note             String?
+  // ── PHASE K2 (§5/§8) — hợp nhất TID + máy của khách (Q-T6) + link HKD (Q-T3) ──
+  customerDeviceSerial String? @map("customer_device_serial") // Q-T6: serial máy CỦA KHÁCH (không tạo PosDevice)
+  dossierId        Int?      @map("dossier_id") // Q-T3: link Hồ sơ HKD (Dossier); giữ hkdName text để hiển thị/backfill
+  // ── LANE A (#11) — Ngành nghề cho TID ──
+  industryId       Int?      @map("industry_id") // #11: Ngành nghề (Industry). Nullable ở DB (TID cũ = null);
+  //                                                "bắt buộc" enforce ở tầng tạo (createTidUnified), không phá dữ liệu cũ.
+  // P1 (nền — quyết định 2A) — LOẠI PHÍ MẶC ĐỊNH chọn theo TỪNG TID lúc giao (PHA 2 set khi giao TID). PHA 1
+  // chỉ thêm cột nullable — TID cũ = null, KHÔNG phá dữ liệu, KHÔNG đụng flow giao TID (đó là PHA 2). Scalar
+  // (trỏ FeeType.id, join ở service — nhất quán event-log, không @relation hình thức).
+  defaultFeeTypeId Int?      @map("default_fee_type_id")
+  createdBy        Int?      @map("created_by")
+  updatedBy        Int?      @map("updated_by")
+  deletedAt        DateTime? @map("deleted_at") @db.Timestamptz(3) // soft-delete cho cấu hình TID (§9b)
+  deletedBy        Int?      @map("deleted_by")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  roomTids ChatRoomTid[] // back-relation cho FK chat_room_tids_tid_id_fkey (bắt buộc khi ChatRoomTid khai @relation tới Tid).
+
+  @@index([partnerId])
+  @@index([bankId])
+  @@index([dossierId])
+  @@index([industryId])
+  @@index([receiveAccountId])
+  // FIX-PERF B132 — list/undelivered/"khách đang giữ" lọc theo (deletedAt, status, deliveredAt) + customerId.
+  // Migration TAY 20260805120000_perf_indexes (tids_deleted_at_status_delivered_at_idx / tids_customer_id_idx).
+  @@index([deletedAt, status, deliveredAt])
+  @@index([customerId])
+  @@map("tids")
+}
+
+// Giao dịch (Nhóm B §Doanh thu) — mỗi lần quẹt/rút qua 1 TID cho 1 khách.
+// Doanh thu = BÓC 2 khoản chênh cộng gộp (LEAD 9/7):
+//   • CL_NCC (chênh đối tác) = phí mua − phí cài máy  → đối soát/thu từ đối tác
+//   • CL_KH  (chênh bán)     = phí bán − phí cài máy  → thu từ khách
+//   Doanh thu = số tiền × (CL_NCC% + CL_KH%). Cả 2 khoản = CÔNG NỢ thu về.
+// Phí lưu snapshot (×1000) để không đổi khi biểu phí đổi. Lọc TID/MID/HKD/khách dẫn xuất từ tidId.
+model Transaction {
+  id                 Int       @id @default(autoincrement())
+  code               String?   @unique // GD00001…
+  tidId              Int       @map("tid_id")
+  customerId         Int?      @map("customer_id")
+  cardTypeId         Int?      @map("card_type_id")
+  // FEE_TYPE (12/7) — LOẠI PHÍ áp cho GD (Ủy quyền/Đối ứng/Tiền chờ…). Cột nullable (int) để không phá GD
+  // lịch sử; service (createTransaction) BẮT BUỘC feeTypeId khi tạo mới → tra đúng biểu phí theo loại phí.
+  feeTypeId          Int?      @map("fee_type_id")
+  amount             BigInt // số tiền giao dịch (VND) — BigInt (R48): GD KHÔNG giới hạn giá trị, tránh tràn int4 (~2,15 tỷ)
+  partnerMarginMilli Int       @default(0) @map("partner_margin_milli") // CL_NCC = phiMua−phiCaiMay (×1000)
+  sellMarginMilli    Int       @default(0) @map("sell_margin_milli") // CL_KH = phiBan−phiCaiMay (×1000)
+  // PHÍ CÀI MÁY áp cho GD này (×1000) — CHỐT tại thời điểm tạo (Admin Demo 11/8). Tất toán NĐT lấy tiền về THEO phí
+  // cài máy của TID set từ đầu (per-txn), KHÔNG lấy %phí cấu hình ở tab nhà đầu tư nữa. Additive default 0.
+  phiCaiMayMilli     Int       @default(0) @map("phi_cai_may_milli")
+  revenuePartner     BigInt    @default(0) @map("revenue_partner") // đối soát đối tác (VND) — BigInt
+  revenueSell        BigInt    @default(0) @map("revenue_sell") // thu khách (VND) — BigInt
+  revenueAmount      BigInt    @default(0) @map("revenue_amount") // tổng doanh thu = partner + sell (VND) — BigInt
+  settled            Boolean   @default(false) // đã thu/đối soát chưa (cho công nợ)
+  settledAt          DateTime? @map("settled_at") @db.Timestamptz(3)
+  txnDate            DateTime  @map("txn_date") @db.Timestamptz(3) // REL-12 (Codex 15/7): timestamptz như mọi cột thời gian khác (tránh lệch múi giờ)
+  note               String?
+  // P1.2 — chứng từ bất biến: bill không sửa; sai thì HỦY qua duyệt. status POSTED|CANCEL_PENDING|CANCELLED.
+  status             String    @default("POSTED")
+  cancelReason       String?   @map("cancel_reason")
+  cancelledAt        DateTime? @map("cancelled_at") @db.Timestamptz(3)
+  cancelRequestId    Int?      @map("cancel_request_id")
+  // H2b — Phân loại chất lượng công nợ: GOOD (Dễ thu hồi) | HARD (Khó thu hồi) | BAD (Không thu hồi).
+  // null = CHƯA phân loại. Đổi qua classifyDebt (perm DEBT_CLASSIFY) + ghi DebtQualityLog + audit.
+  debtQuality        String?   @map("debt_quality")
+  // H2b — Ghi giảm nợ xấu (write-off, Q-F): đánh dấu GD BAD đã ghi giảm → RỚT khỏi công nợ, CẤM ghi
+  // giảm 2 lần (idempotent). Sinh 1 CashEntry CHI "Chi phí nợ xấu" affectsPnl=true = nợ net còn lại.
+  writtenOffAt       DateTime? @map("written_off_at") @db.Timestamptz(3)
+  writtenOffBy       Int?      @map("written_off_by")
+  createdBy          Int?      @map("created_by")
+  updatedBy          Int?      @map("updated_by")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt          DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy          Int?      @map("deleted_by")
+
+  @@index([tidId])
+  @@index([customerId])
+  @@index([txnDate])
+  @@index([status])
+  @@index([debtQuality])
+  @@index([feeTypeId])
+  @@map("transactions")
+}
+
+// P1.2 — Approval Engine (generic). 1 dòng = 1 yêu cầu duyệt trên 1 thực thể (P1.2 = Transaction, action CANCEL).
+// Sau tái dùng cho phiếu thu/chi/nhập/xuất. status PENDING|APPROVED|REJECTED. KHÔNG @@unique.
+model ApprovalRequest {
+  id           Int       @id @default(autoincrement())
+  entityType   String    @map("entity_type") // 'Transaction'
+  entityId     Int       @map("entity_id")
+  action       String // 'CANCEL'
+  reason       String
+  status       String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  requestedBy  Int       @map("requested_by")
+  requestedAt  DateTime  @default(now()) @map("requested_at") @db.Timestamptz(3)
+  decidedBy    Int?      @map("decided_by")
+  decidedAt    DateTime? @map("decided_at") @db.Timestamptz(3)
+  decisionNote String?   @map("decision_note")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([entityType, entityId])
+  @@index([status])
+  @@map("approval_requests")
+}
+
+// Trạng thái TID cấu hình (§9a) — ví dụ: mới cấp, thu hồi, đổi cho đối tác. Khác status vận hành.
+model TidConfigStatus {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
+  createdBy Int?      @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy Int?      @map("updated_by")
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy Int?      @map("deleted_by")
+
+  @@map("tid_config_statuses")
+}
+
+// NHẬT KÝ BẤT BIẾN (§A1) — mọi sự kiện vòng đời POS/TID. Không sửa/xóa.
+model AssetEvent {
+  id           Int      @id @default(autoincrement())
+  deviceSerial String?  @map("device_serial")
+  tid          String?
+  eventType    String   @map("event_type")
+  fromState    String?  @map("from_state")
+  toState      String?  @map("to_state")
+  fromAgentId  Int?     @map("from_agent_id")
+  toAgentId    Int?     @map("to_agent_id")
+  customerId   Int?     @map("customer_id")
+  actorUserId  Int?     @map("actor_user_id")
+  occurredAt   DateTime @map("occurred_at") @db.Timestamptz(3) // thời gian thao tác thực (≠ createdAt)
+  note         String?
+  // R27 (§4 giao đủ trường): giao/đổi-khách ghi KHO XUẤT + ĐỊA CHỈ GIAO. fromWarehouseId trỏ danh mục
+  // Kho; deliveryAddress = SNAPSHOT địa chỉ lúc giao (lưu bản sao để lịch sử không đổi khi kho sửa địa chỉ).
+  fromWarehouseId Int?  @map("from_warehouse_id")
+  deliveryAddress String? @map("delivery_address")
+  // LOẠI GIAO MÁY (Admin Demo) — ghi LOẠI GIAO (Bán/Cho thuê/Mượn/Cọc) + SỐ TIỀN lúc DEPLOY/giao-TID để
+  // vòng đời/timeline hiển thị "giao theo hình thức gì, bao nhiêu tiền". Nullable (sự kiện cũ + giao nội
+  // bộ không loại giao = null). handoverTypeId trỏ HandoverType (join ở service, nhất quán event-log).
+  handoverTypeId Int?    @map("handover_type_id")
+  handoverAmount BigInt? @map("handover_amount")
+  beforeJson   String?  @map("before_json")
+  afterJson    String?  @map("after_json")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([deviceSerial])
+  @@index([tid])
+  @@index([handoverTypeId])
+  @@map("asset_events")
+}
+
+// R27 (Admin Demo 12/7) — DANH MỤC KHO: mỗi kho có địa chỉ. Giao máy chọn "Từ kho" → địa chỉ tự hiện.
+// Master-data chuẩn (mã/tên/địa chỉ/trạng thái + audit + soft-delete), khuôn theo Bank/Partner.
+model Warehouse {
+  id        Int       @id @default(autoincrement())
+  code      String    @unique // Mã kho (uppercase, unique toàn cục kể cả đã xóa)
+  name      String // Tên kho
+  address   String? // Địa chỉ kho — DỰ PHÒNG (kho cũ). §4: nếu có managerUserId thì địa chỉ LẤY TỪ hồ sơ user quản lý.
+  phone     String? // SĐT kho — DỰ PHÒNG (kho cũ). §4: ưu tiên SĐT hồ sơ user quản lý khi có managerUserId.
+  // §4 (Admin Demo 12/7) — User QUẢN LÝ kho: chọn 1 user → địa chỉ + SĐT hiển thị READ-ONLY lấy từ hồ sơ user.
+  // Scalar (join tại service, nhất quán event-log). Nullable: kho cũ = null → dùng address/phone cột kho.
+  managerUserId Int?   @map("manager_user_id")
+  note      String?
+  status    String    @default("ACTIVE") // ACTIVE | INACTIVE (kho ngừng dùng — vẫn giữ, không gợi ý khi giao)
+  createdBy Int?      @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy Int?      @map("updated_by")
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy Int?      @map("deleted_by")
+
+  @@index([managerUserId])
+  @@map("warehouses")
+}
+
+// Gắn POS↔TID theo thời gian (§A2) — giữ lịch sử bind/unbind.
+// POS #1 (Admin Demo 12/7): bất biến "1 máy 1 TID SỐNG" được KHÓA CỨNG ở DB bằng 2 partial-unique
+// (migration 20260712190000_pos_binding_unique) — Prisma không diễn đạt được partial-unique nên
+// đặt ngoài schema: UNIQUE(pos_serial) WHERE unbound_at IS NULL + UNIQUE(tid) WHERE unbound_at IS NULL.
+// → mỗi máy tối đa 1 binding mở, mỗi TID tối đa 1 binding mở (backstop cho guard tầng service).
+model PosTidBinding {
+  id           Int       @id @default(autoincrement())
+  posSerial    String    @map("pos_serial")
+  tid          String
+  boundAt      DateTime  @map("bound_at") @db.Timestamptz(3)
+  unboundAt    DateTime? @map("unbound_at") @db.Timestamptz(3)
+  unbindReason String?   @map("unbind_reason")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([posSerial])
+  @@index([tid])
+  @@map("pos_tid_bindings")
+}
+
+// #3 (Admin Demo 12/7) — CHỨNG TỪ BÁN máy/TID (bất biến, giống bill). Doanh thu ghi nhận ĐỦ NGAY = salePrice
+// (accrual ⓵A) qua CashEntry SALE_POS/SALE_TID fundId=null; tiền thu vào quỹ qua CashEntry DEBT_CUSTOMER +
+// DeviceSaleSettlement. Công nợ mua thiết bị của khách = Σ salePrice − Σ settlement.amount.
+model DeviceSale {
+  id            Int       @id @default(autoincrement())
+  code          String?   @unique // BS##### (Bán − Sale)
+  saleKind      String    @map("sale_kind") // POS | TID
+  deviceSerial  String?   @map("device_serial") // khi bán máy (kèm TID nếu có)
+  tid           String? // khi bán TID (riêng, hoặc TID bán kèm máy)
+  customerId    Int       @map("customer_id") // khách MUA
+  // LOẠI GIAO MÁY (Admin Demo) — Bán luôn moneyKind=SALE; cột này để BÁO CÁO doanh thu theo loại giao
+  // (chọn "Bán" ở dropdown loại giao → route sang luồng bán). Nullable (chứng từ bán cũ = null).
+  handoverTypeId Int?     @map("handover_type_id")
+  salePrice     BigInt    @map("sale_price") // giá bán (VND, > 0) — doanh thu ghi nhận đủ ngay
+  warehouseId   Int?      @map("warehouse_id") // kho xuất (bán máy)
+  soldByUserId  Int?      @map("sold_by_user_id") // người bán
+  occurredAt    DateTime  @map("occurred_at") @db.Timestamptz(3)
+  note          String?
+  status        String    @default("POSTED") // POSTED (CANCELLED = pha sau, qua duyệt)
+  createdBy     Int?      @map("created_by")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy     Int?      @map("updated_by")
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy     Int?      @map("deleted_by")
+
+  @@index([customerId])
+  @@index([saleKind])
+  @@index([deviceSerial])
+  @@index([tid])
+  @@index([status])
+  @@map("device_sales")
+}
+
+// Áp phiếu thu (CashEntry DEBT_CUSTOMER) vào 1 chứng từ bán → giảm công nợ mua thiết bị (mirror CashDebtSettlement).
+model DeviceSaleSettlement {
+  id           Int      @id @default(autoincrement())
+  deviceSaleId Int      @map("device_sale_id")
+  cashEntryId  Int      @map("cash_entry_id")
+  amount       BigInt // VND áp vào chứng từ bán này (> 0)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([deviceSaleId])
+  @@index([cashEntryId])
+  @@map("device_sale_settlements")
+}
+
+// LOẠI GIAO MÁY (Admin Demo) — CHỨNG TỪ CỌC máy/TID (bất biến, NHÂN khuôn DeviceSale). Khi giao máy hình
+// thức "Cọc": tiền cọc = NỢ PHẢI TRẢ (KHÔNG doanh thu) qua CashEntry THU danh mục DEPOSIT (affectsPnl=false,
+// sourceType='DEVICE_DEPOSIT', sourceId=depositId). Thu hồi máy về (recall) → HOÀN CỌC phần còn giữ =
+// CashEntry CHI danh mục DEPOSIT_REFUND + DeviceDepositRefund. Phần cọc CÒN GIỮ = amount − Σrefund (LIVE).
+model DeviceDeposit {
+  id             Int       @id @default(autoincrement())
+  code           String?   @unique // CO##### (Cọc)
+  customerId     Int       @map("customer_id") // khách đặt cọc
+  deviceSerial   String?   @map("device_serial") // máy nhận cọc (giao kèm máy công ty)
+  tid            String? // TID nhận cọc (nếu giao TID kèm máy)
+  handoverTypeId Int?      @map("handover_type_id") // loại giao = Cọc (moneyKind=DEPOSIT)
+  amount         BigInt // tiền cọc (VND, > 0)
+  status         String    @default("OPEN") // OPEN | REFUNDED | CANCELLED
+  occurredAt     DateTime  @map("occurred_at") @db.Timestamptz(3)
+  note           String?
+  createdBy      Int?      @map("created_by")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([customerId])
+  @@index([deviceSerial])
+  @@index([tid])
+  @@index([status])
+  @@map("device_deposits")
+}
+
+// Hoàn cọc (NHÂN DeviceSaleSettlement) — mỗi lần hoàn 1 phần cọc gắn 1 CashEntry CHI DEPOSIT_REFUND.
+// Cọc CÒN GIỮ = DeviceDeposit.amount − Σ DeviceDepositRefund.amount (LIVE, không lưu cứng).
+model DeviceDepositRefund {
+  id              Int      @id @default(autoincrement())
+  deviceDepositId Int      @map("device_deposit_id")
+  cashEntryId     Int      @map("cash_entry_id")
+  amount          BigInt // VND hoàn ở lần này (> 0)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([deviceDepositId])
+  @@index([cashEntryId])
+  @@map("device_deposit_refunds")
+}
+
+// Bộ đếm sinh mã atomic (§D) — NV/KH/POS... zero-pad ≥2.
+model CodeCounter {
+  prefix    String   @id
+  lastValue Int      @default(0) @map("last_value")
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("code_counters")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// G-CFG.1 — Cấu hình ngân hàng (§C1–C4). Ngân hàng · Loại thẻ (POS) · Đối tác ·
+// liên kết Đối tác↔Ngân hàng (many-to-many). Mọi bảng có yếu tố truy vết
+// (createdBy/updatedBy + timestamps) + soft-delete (deletedAt). Không hard FK để
+// event log/audit bền với soft-delete/rename; join ở service layer.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Ngân hàng (§C1/C2). Mã ngân hàng unique.
+model Bank {
+  id        Int       @id @default(autoincrement())
+  seq       Int?      @unique // số thứ tự tuần tự → hiển thị NH01, NH02... (gán khi tạo, cố định)
+  name      String
+  code      String    @unique // VCB, TCB... (unique, không phân biệt hoa/thường ở service)
+  status    String    @default("ACTIVE") // ACTIVE | INACTIVE (ngân hàng ngừng dùng — vẫn giữ, không gợi ý khi tạo TID)
+  createdBy Int?      @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy Int?      @map("updated_by")
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy Int?      @map("deleted_by")
+
+  @@map("banks")
+}
+
+// Loại thẻ dùng trên máy POS (§C3) — thuộc 1 ngân hàng. Mã loại thẻ unique trong 1 ngân hàng (enforce ở service).
+model CardType {
+  id        Int       @id @default(autoincrement())
+  bankId    Int       @map("bank_id")
+  name      String
+  code      String
+  createdBy Int?      @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy Int?      @map("updated_by")
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy Int?      @map("deleted_by")
+
+  @@index([bankId])
+  @@map("card_types")
+}
+
+// Đối tác (§C4). Mã đối tác unique.
+model Partner {
+  id            Int       @id @default(autoincrement())
+  name          String
+  code          String    @unique
+  status        String    @default("UNSIGNED") // trạng thái hợp đồng hợp tác: SIGNED | UNSIGNED | TERMINATED (mã tra trong StatusOption entity=PARTNER)
+  address       String?
+  phone         String?
+  email         String?
+  contactPerson String?   @map("contact_person")
+  createdBy     Int?      @map("created_by")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy     Int?      @map("updated_by")
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy     Int?      @map("deleted_by")
+
+  @@map("partners")
+}
+
+// Liên kết Đối tác ↔ Ngân hàng (§C4c, many-to-many). 1 đối tác liên kết nhiều ngân hàng.
+// Soft-delete: hủy liên kết = set deletedAt (re-link = clear deletedAt) — không xóa vật lý (R_AUDIT_TRAIL).
+model PartnerBank {
+  id        Int       @id @default(autoincrement())
+  partnerId Int       @map("partner_id")
+  bankId    Int       @map("bank_id")
+  createdBy Int?      @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy Int?      @map("updated_by")
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  @@unique([partnerId, bankId])
+  @@index([partnerId])
+  @@index([bankId])
+  @@map("partner_banks")
+}
+
+// Danh mục trạng thái tùy biến dùng chung (R14). Mỗi thực thể (entity) có bộ trạng thái riêng.
+// - isBuiltin=true: trạng thái mặc định hệ thống seed — KHÔNG xóa, KHÔNG đổi `code` (chỉ đổi label/tone/sortOrder/active).
+// - Nhóm được phép "thêm mới" điều khiển bằng map cứng ENTITY_ALLOW_ADD trong status-catalog-service (master-data mới cho thêm).
+// Cột `status` của các bảng (Bank/Customer/Partner…) lưu `code` tra ở đây theo entity.
+model StatusOption {
+  id        Int       @id @default(autoincrement())
+  entity    String    // BANK | CUSTOMER | PARTNER | POS_DEVICE | HKD_MST | ...
+  code      String    // ACTIVE, INACTIVE, LOCKED, SIGNED, ... hoặc custom (CUSTOM_<n>)
+  label     String    // nhãn hiển thị: "Đang hoạt động"
+  tone      String    @default("slate") // emerald|amber|slate|rose|sky|indigo|violet|brand
+  isBuiltin Boolean   @default(false) @map("is_builtin")
+  sortOrder Int       @default(0) @map("sort_order")
+  active    Boolean   @default(true) // ẩn/hiện trong dropdown chọn (builtin đã gán vẫn hiển thị badge)
+  createdBy Int?      @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy Int?      @map("updated_by")
+  // @default(now()) BẮT BUỘC cho KHỚP DB: migration 20260711170000_status_catalog tạo cột updated_at với
+  // DEFAULT CURRENT_TIMESTAMP (xem 20260802060000_restore_unrelated_drift_from_migrate_dev). @updatedAt để
+  // Prisma tự set khi UPDATE; @default(now()) đặt DEFAULT ở DB (không có sẽ drift so với migrations, exit≠0).
+  updatedAt DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy Int?      @map("deleted_by")
+
+  @@unique([entity, code])
+  @@index([entity])
+  @@map("status_options")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// G-CFG.2 — Chuỗi cung ứng máy POS (§C6 NCC · §C7 Chủng loại · §C8 Nhập kho)
+// Mọi cột @unique trên bảng có deletedAt → service xử lý va chạm với bản đã xóa
+// mềm (DUPLICATE_TRASH) + lưới P2002 (bài học B05/G-CFG-B01).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Nhà cung cấp máy POS (§C6).
+model Supplier {
+  id            Int       @id @default(autoincrement())
+  name          String
+  code          String    @unique
+  address       String?
+  phone         String?
+  contactPerson String?   @map("contact_person")
+  createdBy     Int?      @map("created_by")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy     Int?      @map("updated_by")
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy     Int?      @map("deleted_by")
+
+  @@map("suppliers")
+}
+
+// Chủng loại máy POS (§C7) — Mã máy + Tên máy.
+model PosModel {
+  id        Int       @id @default(autoincrement())
+  code      String    @unique // mã máy POS
+  name      String // tên máy POS
+  createdBy Int?      @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy Int?      @map("updated_by")
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy Int?      @map("deleted_by")
+
+  @@map("pos_models")
+}
+
+// Trạng thái nhập máy (§C8a) — ví dụ: Máy mới, máy cũ, Máy đổi, Máy thuê.
+model PosIntakeStatus {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
+  createdBy Int?      @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy Int?      @map("updated_by")
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy Int?      @map("deleted_by")
+
+  @@map("pos_intake_statuses")
+}
+
+// Nhập kho máy POS (§C8b) — 1 bản ghi = 1 máy nhập kho công ty. Link scalar tới
+// chủng loại / trạng thái / NCC (join ở service, resilient soft-delete).
+model PosIntake {
+  id             Int       @id @default(autoincrement())
+  posModelId     Int       @map("pos_model_id")
+  serial         String    @unique // Seri number — chữ+số, không giới hạn
+  intakeStatusId Int       @map("intake_status_id")
+  supplierId     Int       @map("supplier_id")
+  importPrice    Int       @map("import_price") // giá nhập (VND, số nguyên đồng)
+  importedAt     DateTime  @map("imported_at") @db.Timestamptz(3) // ngày nhập
+  note           String?
+  createdBy      Int?      @map("created_by")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy      Int?      @map("updated_by")
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy      Int?      @map("deleted_by")
+
+  @@index([posModelId])
+  @@index([supplierId])
+  @@index([intakeStatusId])
+  @@map("pos_intakes")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// G-CFG.3 — Cấu hình phí (§C5): Loại phí (C5a) + Biểu phí % theo Đối tác×Loại thẻ (C5b)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Loại phí bán (§C5a) — danh mục: Ủy quyền, Tiền chờ, Tiền Nhanh…
+model FeeType {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
+  createdBy Int?      @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy Int?      @map("updated_by")
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy Int?      @map("deleted_by")
+
+  @@map("fee_types")
+}
+
+// LOẠI GIAO MÁY (Admin Demo) — danh mục hình thức GIAO máy/TID cho khách, quyết định MÔ HÌNH TIỀN qua
+// `moneyKind`: SALE (bán đứt → doanh thu, luồng device-sale) | RENT (cho thuê → thu 1 lần, doanh thu) |
+// DEPOSIT (cọc → nợ phải trả, KHÔNG doanh thu, recall hoàn cọc) | NONE (mượn → 0đ). isBuiltin = 4 loại
+// hệ thống seed (khóa moneyKind, cấm xóa; cho đổi name/sortOrder). Khuôn FeeType (name @unique + audit +
+// soft-delete). Cột `handoverTypeId` các bảng (AssetEvent/DeviceSale/DeviceDeposit) trỏ id ở đây.
+model HandoverType {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
+  moneyKind String    @map("money_kind") // SALE | RENT | DEPOSIT | NONE | COUNTERPART(đối ứng)
+  // Admin Demo 9/8 — ĐẶT CỌC là cờ ĐỘC LẬP (POS/TID), ghép mọi hình thức tiền: Cho thuê/Mượn/Đối ứng CÓ thể kèm cọc
+  // (tùy chọn), Bán không cọc. Tách cọc khỏi moneyKind=DEPOSIT loại-trừ cũ. Migration tay 20260809_handover_has_deposit.
+  hasDeposit Boolean  @default(false) @map("has_deposit")
+  isBuiltin Boolean   @default(false) @map("is_builtin")
+  sortOrder Int       @default(0) @map("sort_order")
+  createdBy Int?      @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy Int?      @map("updated_by")
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy Int?      @map("deleted_by")
+
+  @@map("handover_types")
+}
+
+// Biểu phí % (§C5b) — 1 dòng = 1 tổ hợp Đối tác × Loại thẻ (loại thẻ đã gắn Ngân hàng ở C3).
+// FEE_MODEL (Admin Demo 12/7): LOẠI PHÍ CHỈ đổi PHÍ BÁN. Phí MUA + phí CÀI MÁY là 1 giá CỐ ĐỊNH cho
+// tổ hợp (Đối tác × Loại thẻ) — KHÔNG theo loại phí. Vì vậy FeeRate chỉ giữ phiMua/phiCaiMay (bỏ
+// feeTypeId + phiBan). Phí bán niêm yết theo TỪNG loại phí nằm ở model FeeSellQuote (bên dưới).
+// Phí lưu Int = phần trăm × 1000 (tối đa 3 số thập phân, chính xác tuyệt đối — không dùng float).
+// Chênh lệch NCC là cột TÍNH (không lưu): CL_NCC = phiMua−phiCaiMay (giống nhau mọi loại phí).
+// P1.1 (GIÁ THEO KỲ): mỗi dòng = 1 KỲ giá của tổ hợp (Đối tác × Loại thẻ), phân biệt bởi
+// `effectiveFrom`. Nhiều kỳ cùng tồn tại (lịch sử giá). Phí của 1 GD = kỳ đang hiệu lực tại
+// `txnDate` (pickEffectiveRate). KHÔNG @@unique DB (bảng có deletedAt — bài học B05); "1 kỳ/1 mốc"
+// enforce ở service. Kỳ hiệu lực = (partnerId, cardTypeId) + effectiveFrom.
+model FeeRate {
+  id           Int       @id @default(autoincrement())
+  partnerId    Int       @map("partner_id")
+  cardTypeId   Int       @map("card_type_id")
+  phiMua       Int       @map("phi_mua") // ×1000 — 1 giá cố định (không theo loại phí)
+  phiCaiMay    Int       @map("phi_cai_may") // ×1000 — 1 giá cố định (không theo loại phí)
+  effectiveFrom DateTime @map("effective_from") // ngày bắt đầu hiệu lực của kỳ giá (P1.1)
+  createdBy  Int?      @map("created_by")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy  Int?      @map("updated_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy  Int?      @map("deleted_by")
+
+  @@index([partnerId])
+  @@index([cardTypeId])
+  @@map("fee_rates")
+}
+
+// Phí BÁN NIÊM YẾT theo LOẠI PHÍ (FEE_MODEL 12/7) — 1 dòng = 1 (Đối tác × Loại thẻ × LOẠI PHÍ) tại 1 KỲ
+// (`effectiveFrom`). Mỗi loại phí bán trong danh mục (Ủy quyền/Tiền chờ/Tiền nhanh…) có % niêm yết RIÊNG.
+// Set biểu phí = 1 lần cấu hình phí mua/cài (FeeRate) + % bán cho MỌI loại phí (nhiều FeeSellQuote), CÙNG
+// effectiveFrom. Phí bán thực tế của TID: niêm yết ở đây nếu không tùy chỉnh, ngược lại TidSellFee override.
+// Phí lưu Int = %×1000. KHÔNG @@unique DB (có deletedAt — bài học B05); "1 kỳ/1 mốc/loại phí" enforce ở service.
+model FeeSellQuote {
+  id            Int       @id @default(autoincrement())
+  partnerId     Int       @map("partner_id")
+  cardTypeId    Int       @map("card_type_id")
+  feeTypeId     Int       @map("fee_type_id")
+  phiBan        Int       @map("phi_ban") // ×1000 — % phí bán niêm yết của loại phí này
+  effectiveFrom DateTime  @map("effective_from") // cùng kỳ với FeeRate (pickEffectiveRate dùng chung)
+  createdBy     Int?      @map("created_by")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy     Int?      @map("updated_by")
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy     Int?      @map("deleted_by")
+
+  @@index([partnerId])
+  @@index([cardTypeId])
+  @@index([feeTypeId])
+  @@map("fee_sell_quotes")
+}
+
+// R30 (Admin Demo 11/7) — Phí BÁN THỰC TẾ theo từng TID × Loại thẻ (tùy biến theo khách khi GIAO máy).
+// Biểu phí FeeRate (Đối tác × Loại thẻ) chỉ là phí NIÊM YẾT chung; phí bán thật thỏa thuận riêng cho
+// mỗi TID/khách/thẻ, nhập lúc giao máy. `phiBan` Int = %×1000 (như FeeRate). resolveFeeForTxn ưu tiên
+// override này thay cho FeeRate.phiBan khi tính CL_KH (phí cài máy vẫn lấy từ kỳ FeeRate hiệu lực).
+// KHÔNG @@unique DB đầy đủ (có deletedAt — bài học B05). "1 phí / 1 (tid, thẻ, loại phí, KỲ) còn sống" enforce
+// ở service (setTidSellFees khóa FOR UPDATE hàng tid) + PARTIAL UNIQUE INDEX `tid_sell_fees_active_uq`
+// (WHERE deleted_at IS NULL) làm backstop cấp DB — xem migration 20260712100000_r30r34_concurrency_guards
+// (bản gốc (tid,thẻ)) → 20260712240000_fee_type_dimension (+loại phí) → 20260805140000_fee_effective_periods
+// (+KỲ theo NGÀY: partial-unique có cột biểu thức ((effective_from AT TIME ZONE 'Asia/Ho_Chi_Minh')::date)).
+// P1 (nền phí hiệu-lực-theo-kỳ) — TidSellFee đổi từ "1 override active" → "nhiều KỲ override" GIỐNG FeeSellQuote:
+// mỗi dòng = 1 KỲ phí bán THỰC TẾ của (tid × thẻ × loại phí) phân biệt bởi `effectiveFrom`. Phí bán thực tế của
+// 1 GD = KỲ override hiệu lực tại `txnDate` (pickEffectiveRate); không có KỲ override nào ≤ txnDate → dùng niêm yết.
+model TidSellFee {
+  id         Int       @id @default(autoincrement())
+  tidId      Int       @map("tid_id")
+  cardTypeId Int       @map("card_type_id")
+  // FEE_TYPE (12/7) — phí bán thực tế nay theo (TID × Loại thẻ × LOẠI PHÍ). Khóa "1 phí còn sống" =
+  // (tid_id, card_type_id, fee_type_id, NGÀY effective_from) — partial unique index `tid_sell_fees_active_uq`.
+  feeTypeId  Int       @map("fee_type_id")
+  phiBan     Int       @map("phi_ban") // phí BÁN thực tế, ×1000
+  // P1 — mốc bắt đầu hiệu lực của KỲ override (giống FeeSellQuote.effectiveFrom). @db.Timestamptz(3). Service
+  // setTidSellFees LUÔN ghi startOfDayLocal (nửa đêm LOCAL) tường minh; @default(now()) chỉ là lưới an toàn cho
+  // creator cũ chưa truyền (hàng cũ backfill = now() lúc migrate — xem 20260805140000_fee_effective_periods).
+  effectiveFrom DateTime @default(now()) @map("effective_from") @db.Timestamptz(3)
+  createdBy  Int?      @map("created_by")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy  Int?      @map("updated_by")
+  // @default(now()) BẮT BUỘC cho KHỚP DB: migration 20260711190000_tid_sell_fee tạo cột updated_at với DEFAULT
+  // CURRENT_TIMESTAMP (xem 20260802060000_restore_unrelated_drift_from_migrate_dev). Lý do y hệt StatusOption.
+  updatedAt  DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy  Int?      @map("deleted_by")
+
+  @@index([tidId])
+  @@index([cardTypeId])
+  @@index([feeTypeId])
+  @@map("tid_sell_fees")
+}
+
+// P1 (nền — LỊCH SỬ DOANH SỐ) — nhật ký RECALC doanh thu. Khi biểu phí / KỲ override đổi, engine (PHA 2) tính
+// LẠI doanh thu MỌI GD POSTED bị ảnh hưởng (quyết định 3a: kể cả GD đã đối soát; KHÔNG đụng amount/mã GD) và
+// ghi 1 hàng before→after ở đây để soi lịch sử. PHA 1 chỉ dựng NỀN (bảng + cột) — CHƯA có engine ghi.
+// Cột tiền int8/BigInt (before/afterRevenueAmount) — khi serialize PHẢI qua BigInt.toJSON shim
+// (packages/services/src/bigint-json.ts); mock test cột này dùng literal `1000n` (không `1000`). Link scalar
+// (transactionId Int, KHÔNG hard FK) — nhất quán triết lý event-log các bảng SigMa/asset (không @relation hình thức).
+model RevenueRecalcLog {
+  id                  Int      @id @default(autoincrement())
+  transactionId       Int      @map("transaction_id")
+  feeEffectiveFrom    DateTime @map("fee_effective_from") @db.Timestamptz(3) // KỲ phí mới khiến GD được tính lại
+  beforePartnerMargin Int      @map("before_partner_margin") // CL_NCC (×1000) TRƯỚC recalc
+  beforeSellMargin    Int      @map("before_sell_margin") // CL_KH (×1000) TRƯỚC recalc
+  beforeRevenueAmount BigInt   @map("before_revenue_amount") // doanh thu tổng (VND) TRƯỚC recalc — int8
+  afterPartnerMargin  Int      @map("after_partner_margin") // CL_NCC (×1000) SAU recalc
+  afterSellMargin     Int      @map("after_sell_margin") // CL_KH (×1000) SAU recalc
+  afterRevenueAmount  BigInt   @map("after_revenue_amount") // doanh thu tổng (VND) SAU recalc — int8
+  reason              String? // vì sao recalc (vd 'FEE_RATE_SET', 'TID_SELL_FEE_SET') — tự do, tra ở PHA 2
+  actorUserId         Int?     @map("actor_user_id")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([transactionId])
+  @@map("revenue_recalc_logs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// G-CFG.4 — Tài khoản nhận tiền – ủy quyền (§8): nguồn TK (8a) + TK (8b)
+// Ảnh CCCD lưu ngoài DB (docs/FILE_UPLOAD_CONVENTION.md): DB giữ path + tên gốc + checksum.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Nguồn tài khoản ủy quyền (§8a) — ví dụ: Khách hàng, Nội bộ…
+model ReceiveAccountSource {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
+  createdBy Int?      @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy Int?      @map("updated_by")
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy Int?      @map("deleted_by")
+
+  @@map("receive_account_sources")
+}
+
+// Tài khoản nhận tiền – ủy quyền (§8b).
+model ReceiveAccount {
+  id             Int       @id @default(autoincrement())
+  sourceId       Int       @map("source_id") // nguồn TK (8a)
+  accountName    String    @map("account_name") // Tên tài khoản (chủ TK)
+  accountNumber  String    @map("account_number") // STK
+  bankId         Int       @map("bank_id") // Ngân hàng
+  branch         String? // Chi nhánh
+  cccdNumber     String?   @map("cccd_number") // Số CCCD nhận ủy quyền
+  cccdIssueDate  DateTime? @map("cccd_issue_date") // Ngày cấp
+  cccdIssuePlace String?   @map("cccd_issue_place") // Nơi cấp
+  cccdExpiry     DateTime? @map("cccd_expiry") // Ngày hết hạn
+  phone          String?
+  email          String? // email đối soát
+  // UỶ (Admin Demo 9/8) — tài khoản nhận tiền uỷ cho 1 bên: Khách hàng (customerId) | Nhà đầu tư (investorId) | Nội bộ
+  // (cả hai null). Loại uỷ (owyType) SUY RA ở service, KHÔNG lưu cột. Cấm set CẢ customerId LẪN investorId (1 bên).
+  // TID gắn TK này ⇒ suy uỷ qua đây (POS đi theo TID, không field). Scalar (join tên ở service — no-hard-FK).
+  customerId     Int?      @map("customer_id") // uỷ Khách hàng (null = không phải KH)
+  investorId     Int?      @map("investor_id") // uỷ Nhà đầu tư (null = không phải NĐT)
+  // Nhóm chat của NĐT gắn vào TK nhận tiền khi uỷ=NĐT ("ở uỷ như khách", Phase E). Nullable; CHỈ có nghĩa khi
+  // investorId set + group thuộc đúng NĐT đó (validate ở service). Scalar → investor_chat_groups.id (no hard FK).
+  investorChatGroupId Int?  @map("investor_chat_group_id")
+  // Ảnh CCCD (path tương đối trong uploads/ + tên gốc). Mặt sau không bắt buộc.
+  cccdFrontPath  String?   @map("cccd_front_path")
+  cccdFrontName  String?   @map("cccd_front_name")
+  cccdBackPath   String?   @map("cccd_back_path")
+  cccdBackName   String?   @map("cccd_back_name")
+  note           String?
+  createdBy      Int?      @map("created_by")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy      Int?      @map("updated_by")
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy      Int?      @map("deleted_by")
+
+  @@index([sourceId])
+  @@index([bankId])
+  @@index([customerId])
+  @@map("receive_accounts")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// G-CFG.5 — Quản lý Hồ sơ HKD (§10): nguồn hồ sơ (10a/b) + hồ sơ HKD (10c/d)
+// Ảnh ĐKKD + CCCD lưu ngoài DB (docs/FILE_UPLOAD_CONVENTION.md, kind='dossier').
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Nguồn hồ sơ (§10a) — mã + chính sách chiết khấu %.
+model DossierSource {
+  id           Int       @id @default(autoincrement())
+  code         String    @unique // Mã nguồn hồ sơ
+  discountRate Int       @default(0) @map("discount_rate") // chiết khấu % ×1000 (≤3 thập phân, Int chính xác)
+  createdBy    Int?      @map("created_by")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy    Int?      @map("updated_by")
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy    Int?      @map("deleted_by")
+
+  @@map("dossier_sources")
+}
+
+// Hồ sơ Hộ Kinh Doanh (§10c). Ảnh ĐKKD/CCCD 2 mặt lưu ngoài DB (path + tên gốc).
+model Dossier {
+  id               Int       @id @default(autoincrement())
+  sourceId         Int       @map("source_id") // nguồn hồ sơ (10a)
+  hkdName          String    @map("hkd_name") // Tên Hộ Kinh Doanh
+  hkdAddress       String?   @map("hkd_address") // Địa chỉ đăng ký HKD
+  taxCode          String?   @map("tax_code") // MST / Mã số ĐK HKD
+  mstStatus        String    @default("ACTIVE") @map("mst_status") // Trạng thái MST: ACTIVE=Hoạt động / CLOSED=Đóng
+  dkkdIssueDate    DateTime? @map("dkkd_issue_date") // Ngày cấp ĐKKD
+  dkkdIssuePlace   String?   @map("dkkd_issue_place") // Nơi cấp ĐKKD
+  ownerName        String    @map("owner_name") // Tên chủ hộ kinh doanh
+  gender           String? // Giới tính
+  ethnicity        String? // Dân tộc
+  cccdNumber       String?   @map("cccd_number") // Số CCCD
+  cccdIssueDate    DateTime? @map("cccd_issue_date") // Ngày cấp
+  cccdIssuePlace   String?   @map("cccd_issue_place") // Nơi cấp
+  cccdExpiry       DateTime? @map("cccd_expiry") // Ngày hết hạn
+  permanentAddress String?   @map("permanent_address") // Địa chỉ thường trú
+  currentAddress   String?   @map("current_address") // Nơi ở hiện tại
+  email            String? // Địa chỉ email liên hệ
+  // Ảnh ĐKKD (đặt tên theo Tên HKD) + CCCD (đặt tên theo Tên chủ hộ). Mặt sau không bắt buộc.
+  dkkdFrontPath    String?   @map("dkkd_front_path")
+  dkkdFrontName    String?   @map("dkkd_front_name")
+  dkkdBackPath     String?   @map("dkkd_back_path")
+  dkkdBackName     String?   @map("dkkd_back_name")
+  cccdFrontPath    String?   @map("cccd_front_path")
+  cccdFrontName    String?   @map("cccd_front_name")
+  cccdBackPath     String?   @map("cccd_back_path")
+  cccdBackName     String?   @map("cccd_back_name")
+  note             String?
+  createdBy        Int?      @map("created_by")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy        Int?      @map("updated_by")
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt        DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy        Int?      @map("deleted_by")
+
+  @@index([sourceId])
+  @@map("dossiers")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// G-CFG.7 — Ngành nghề (master, §11 Pha I1). Vận tải, tạp hóa, cà phê… theo ĐKKD.
+// PHA I1 = CHỈ master data + trang cấu hình RIÊNG. KHÔNG gắn industryId vào FeeRate/Tid
+// ở pha này (đó là I2 — chờ Admin Demo duyệt). Khuôn F10: mã @unique (CodeCounter prefix 'NGH'),
+// soft-delete (deletedAt) + audit (createdBy/updatedBy) + DUPLICATE_TRASH + P2002 guard ở service.
+// ─────────────────────────────────────────────────────────────────────────────
+model Industry {
+  id        Int       @id @default(autoincrement())
+  code      String    @unique // NGH01, NGH02... (CodeCounter prefix 'NGH')
+  name      String
+  active    Boolean   @default(true) // đang dùng / ngừng dùng (giữ lịch sử, không xóa cứng)
+  note      String?
+  createdBy Int?      @map("created_by")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy Int?      @map("updated_by")
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy Int?      @map("deleted_by")
+
+  @@map("industries")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bill giải trình (Admin Demo 16/7) — sinh hóa đơn giải trình số tiền + thư viện sản phẩm theo ngành nghề.
+// Product = thư viện SP (tên/đơn vị/đơn giá) gắn 1 ngành (industryId). BillExplain = mỗi lần sinh (tab theo dõi).
+// Khuôn F10: soft-delete (deletedAt) + audit (createdBy/updatedBy). Đơn giá SP = Int (VND, < 2,15 tỷ đủ cho 1 SP).
+// ─────────────────────────────────────────────────────────────────────────────
+model Product {
+  id         Int       @id @default(autoincrement())
+  industryId Int       @map("industry_id") // ngành nghề (Industry) — mỗi nhóm ngành có thư viện SP riêng
+  name       String
+  unit       String // đơn vị tính (cái/kg/lít/vé…)
+  price      Int // đơn giá VND nguyên
+  priority   Int       @default(0) // ưu tiên khi sinh dòng bill (Admin Demo 16/7): cao = SP hữu dụng, ưu tiên chọn. 0 = trung tính
+  status     String    @default("ACTIVE") // ACTIVE | INACTIVE
+  createdBy  Int?      @map("created_by")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy  Int?      @map("updated_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy  Int?      @map("deleted_by")
+
+  @@index([industryId])
+  @@map("products")
+}
+
+model BillExplain {
+  id          Int       @id @default(autoincrement())
+  code        String?   @unique // BE00001… (CodeCounter prefix 'BE')
+  // NULLABLE (Admin Demo 21/8): bill có thể dùng TÊN HKD của TID (Tid.hkdName) thay vì Hồ sơ HKD (dossierId) — hệ hiện
+  // 0 Hồ sơ, TID đã có tên HKD. dossierId=null ⟹ tên HKD lấy từ TID (địa chỉ/chủ hộ trống).
+  dossierId   Int?      @map("dossier_id") // Hồ sơ HKD (nguồn tên/địa chỉ/chủ hộ điền vào hóa đơn); null = dùng tên HKD của TID
+  tidId       Int?      @map("tid_id") // TID chỉ để THEO DÕI (không in lên hóa đơn — chốt Admin Demo 16/7)
+  industryId  Int       @map("industry_id")
+  billDate    DateTime  @map("bill_date") @db.Timestamptz(3)
+  totalAmount BigInt    @map("total_amount") // tổng tiền các bill trong lần sinh (VND, có thể lớn → BigInt)
+  billCount   Int       @map("bill_count")
+  filePath    String    @map("file_path") // đường dẫn file .xlsx đã xuất
+  createdBy   Int?      @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy   Int?      @map("deleted_by")
+
+  @@index([dossierId])
+  @@map("bill_explains")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE H1 — Thu–Chi (Cashflow). CashCategory = danh mục khoản THU/CHI (§A/§B spec H).
+// affectsPnl = cột chống double-count lợi nhuận accrual (§5). BẤT BIẾN (I#12): sourceKind nội bộ
+// (DEBT_*/DEPOSIT/DEPOSIT_REFUND/ADVANCE/DEVICE_DEPOSIT/FUND_TRANSFER) CẤM affectsPnl=true —
+// enforce ở cash-category-service (create/update) + selftest. isSystem = seed hệ thống, KHÔNG xóa.
+// Tiền = VND nguyên (KHÔNG ×1000). Mọi DateTime @db.Timestamptz(3) + @map snake_case (M6).
+// ─────────────────────────────────────────────────────────────────────────────
+model CashCategory {
+  id         Int       @id @default(autoincrement())
+  kind       String // THU | CHI
+  name       String
+  unit       String? // đơn vị tính (đồng, máy, tháng…)
+  periodType String?   @map("period_type") // NONE | MONTH | DATE_RANGE — kỳ áp dụng
+  sourceKind String    @default("MANUAL") @map("source_kind") // MANUAL|DEBT_CUSTOMER|DEBT_PARTNER|SALE_POS|SALE_TID|ADVANCE|DEPOSIT|DEPOSIT_REFUND|DEVICE_DEPOSIT|FUND_TRANSFER|SALARY
+  affectsPnl Boolean   @default(true) @map("affects_pnl") // có tính vào lợi nhuận accrual (§5) không
+  isSystem   Boolean   @default(false) @map("is_system") // danh mục hệ thống (seed) — không cho xóa
+  active     Boolean   @default(true)
+  createdBy  Int?      @map("created_by")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy  Int?      @map("updated_by")
+  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy  Int?      @map("deleted_by")
+
+  @@index([kind])
+  @@index([sourceKind])
+  @@map("cash_categories")
+}
+
+// Lịch sử BẢO TRÌ / quét sức khỏe hệ thống (Nhóm E, LEAD 9/7). Mỗi lần quét lưu 1 dòng +
+// báo cáo JSON (danh sách phát hiện lỗi/bug + đề xuất fix). Giữ vết để đối chiếu về sau.
+model MaintenanceRun {
+  id           Int       @id @default(autoincrement())
+  kind         String    @default("MANUAL") // MANUAL | SCHEDULED
+  status       String    @default("OK") // OK | WARN | ERROR
+  checksTotal  Int       @default(0) @map("checks_total")
+  issuesFound  Int       @default(0) @map("issues_found")
+  errorCount   Int       @default(0) @map("error_count")
+  warnCount    Int       @default(0) @map("warn_count")
+  reportJson   String?   @map("report_json") // mảng findings {code,severity,title,count,detail,suggestion}
+  backupFile   String?   @map("backup_file")
+  auditDeleted Int       @default(0) @map("audit_deleted")
+  trashDeleted Int       @default(0) @map("trash_deleted")
+  vacuumed     Boolean   @default(false)
+  autoFixed    Int       @default(0) @map("auto_fixed")
+  durationMs   Int       @default(0) @map("duration_ms")
+  triggeredBy  Int?      @map("triggered_by")
+  startedAt    DateTime  @default(now()) @map("started_at") @db.Timestamptz(3)
+  finishedAt   DateTime? @map("finished_at") @db.Timestamptz(3)
+
+  @@index([startedAt])
+  @@map("maintenance_runs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE H2-core — Thu–Chi (Cashflow): Quỹ (Fund §2.2/J) + Phiếu thu/chi (CashEntry §2.3/D+E).
+// Tiền = VND nguyên (KHÔNG ×1000). Mọi DateTime @db.Timestamptz(3) + @map snake_case (M6).
+// Số dư quỹ KHÔNG lưu cứng — tính running = openingBalance + Σ THU_POSTED − Σ CHI_POSTED theo fundId
+// (I#1, tránh drift R6). Mã QU/PT/PC sinh atomic trong $transaction (§D/R7). Phiếu CANCELLED KHÔNG
+// tính vào số dư. amount > 0 (I#4). kind=CHI bắt buộc payerUserId (I#3). Ngày local (I#10, B16).
+// ─────────────────────────────────────────────────────────────────────────────
+model Fund {
+  id             Int       @id @default(autoincrement())
+  code           String    @unique // QU01… (H6: prefix 2 ký tự — Q 1 ký tự vi phạm CODE_PREFIX_REGEX)
+  name           String // "Quỹ tiền mặt VP", "TK VCB 199…"
+  type           String // CASH | BANK | EWALLET
+  keeperUserId   Int?      @map("keeper_user_id") // ai giữ quỹ (mục J)
+  openingBalance BigInt    @default(0) @map("opening_balance") // VND — số dư đầu kỳ (BigInt R48, KHÔNG lưu số dư hiện tại)
+  active         Boolean   @default(true)
+  note           String?
+  createdBy      Int?      @map("created_by")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy      Int?      @map("updated_by")
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy      Int?      @map("deleted_by")
+
+  @@map("funds")
+}
+
+// Phiếu thu/chi — chứng từ nguyên thủy (D + E). status DRAFT|POSTED|CANCELLED (mặc định POSTED).
+model CashEntry {
+  id             Int       @id @default(autoincrement())
+  code           String?   @unique // PT##### (THU) / PC##### (CHI)
+  kind           String // THU | CHI
+  categoryId     Int       @map("category_id")
+  // fundId NULLABLE (H2b): phần lớn phiếu gắn quỹ (thu/chi tiền thật). Riêng phiếu CHI "Chi phí nợ xấu"
+  // (ghi giảm nợ xấu, sourceType=BAD_DEBT) là bút toán KHÔNG-tiền-mặt (tiền chưa từng vào quỹ) → fundId=null,
+  // KHÔNG trừ số dư quỹ nào (số dư = Σ CashEntry theo fundId), nhưng VẪN vào chi phí lợi nhuận theo categoryId.
+  fundId         Int?      @map("fund_id") // quỹ tiền vào/ra (mục J liên thông) — null cho bút toán phi tiền mặt
+  amount         BigInt // VND nguyên, > 0 (BigInt R48)
+  method         String // CK | CASH
+  entryDate      DateTime  @map("entry_date") @db.Timestamptz(3) // ngày thu/chi (local) — M6
+  customerId     Int?      @map("customer_id") // KH (mục D)
+  partnerId      Int?      @map("partner_id") // đối tác (mục D) — chọn từ danh sách đối tác
+  partnerText    String?   @map("partner_text") // "của ai" nhập tay (đối tác lẻ ngoài danh sách) — loại trừ với partnerId
+  payerUserId    Int?      @map("payer_user_id") // NGƯỜI CHI — bắt buộc khi kind=CHI (mục E, I#3)
+  receiverUserId Int?      @map("receiver_user_id") // người nhận (thu hộ / hoàn cọc)
+  docPath        String?   @map("doc_path")
+  docName        String?   @map("doc_name")
+  sourceType     String?   @map("source_type") // ADVANCE | DEVICE_DEPOSIT | DEPOSIT_REFUND | SALARY | FUND_TRANSFER | null(thủ công)
+  sourceId       Int?      @map("source_id")
+  note           String?
+  status         String    @default("POSTED") // DRAFT | POSTED | CANCELLED
+  cancelReason   String?   @map("cancel_reason")
+  cancelledAt    DateTime? @map("cancelled_at") @db.Timestamptz(3)
+  createdBy      Int?      @map("created_by")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy      Int?      @map("updated_by")
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy      Int?      @map("deleted_by")
+
+  @@index([fundId])
+  @@index([categoryId])
+  @@index([entryDate])
+  @@index([status])
+  @@index([customerId])
+  @@index([partnerId])
+  @@map("cash_entries")
+}
+
+// PHASE H2-debt — Nối phiếu thu công nợ (CashEntry kind=THU, category DEBT_*) ↔ Transaction được tất
+// toán (§2.4). CHỐNG ĐẾM TRÙNG (net-of-settlement, H4): công nợ còn lại từng side =
+//   revenue(side) − Σ CashDebtSettlement.amount(side, GD). Transaction.settled chỉ là HỆ QUẢ, set=true
+// KHI VÀ CHỈ KHI cả 2 side net=0 (trong cùng $transaction tạo phiếu). Hủy phiếu thu công nợ → xóa các
+// dòng settlement + tính lại settled (M3). KHÔNG dùng cờ settled làm nguồn tính nợ.
+model CashDebtSettlement {
+  id            Int      @id @default(autoincrement())
+  cashEntryId   Int      @map("cash_entry_id") // phiếu thu (kind=THU, category DEBT_*)
+  transactionId Int      @map("transaction_id") // GD được tất toán
+  side          String // PARTNER | SELL (CL_NCC — chênh đối tác / CL_KH — chênh bán)
+  amount        BigInt // VND áp vào GD này (> 0, BigInt R48)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([cashEntryId])
+  @@index([transactionId])
+  @@map("cash_debt_settlements")
+}
+
+// PHASE H2b — Lịch sử đổi phân loại chất lượng công nợ (§2.8, LEAD 10/7). Mỗi lần classifyDebt ghi 1 dòng
+// (from→to + lý do + người đổi). toQuality ∈ GOOD|HARD|BAD; fromQuality null nếu trước đó CHƯA phân loại.
+model DebtQualityLog {
+  id            Int      @id @default(autoincrement())
+  transactionId Int      @map("transaction_id")
+  fromQuality   String?  @map("from_quality")
+  toQuality     String   @map("to_quality")
+  reason        String?
+  actorUserId   Int      @map("actor_user_id")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([transactionId])
+  @@map("debt_quality_logs")
+}
+
+// YÊU CẦU XUẤT KHO (Admin Demo PHASE 1) — user thường tạo phiếu YÊU CẦU giao máy POS/TID cho khách theo
+// hình thức Bán (SALE) / Cho thuê (RENT); người có quyền Kho DUYỆT + chọn N seri/TID cụ thể lúc duyệt.
+// Tiền + tồn kho TRỪ lúc DUYỆT (hàng rời kho khi duyệt), KHÔNG lúc tạo phiếu. 1 phiếu = N đơn vị CHƯA
+// biết seri; mỗi dòng ExportRequestLine = 1 máy ở đơn giá phiếu (amount = unitPrice × quantity). Money
+// dùng lại money-model per-máy đã có (device-sale / applyHandover / device-deposit). Tiền = VND nguyên (BigInt).
+model ExportRequest {
+  id             Int       @id @default(autoincrement())
+  code           String?   @unique // YCXK##### (Yêu Cầu Xuất Kho)
+  kind           String // POS | TID
+  handoverKind   String    @map("handover_kind") // SALE | RENT (chỉ 2 hình thức xuất kho — không Sửa/Đổi)
+  // POS: giao KÈM TID (assign+giao). TID: kèm-máy phải quay về phiếu POS nên luôn false.
+  withTid        Boolean   @default(false) @map("with_tid")
+  requesterUserId Int      @map("requester_user_id")
+  bankId         Int?      @map("bank_id") // app bank của máy POS / bank của TID
+  partnerId      Int?      @map("partner_id") // đối tác (cho TID)
+  customerId     Int       @map("customer_id")
+  cardTypeId     Int?      @map("card_type_id") // loại thẻ (tra phí) — cho TID / khi POS kèm TID
+  feeTypeId      Int?      @map("fee_type_id") // loại phí bán
+  priceMode      String    @default("LISTED") @map("price_mode") // LISTED | CUSTOM
+  unitPrice      BigInt    @map("unit_price") // đơn giá 1 đơn vị (×1 đồng)
+  quantity       Int
+  amount         BigInt // = unitPrice × quantity
+  depositAmount  BigInt    @default(0) @map("deposit_amount") // cọc kèm (nếu có)
+  paidAmount     BigInt    @default(0) @map("paid_amount") // tiền thu khi duyệt (SALE)
+  fundId         Int?      @map("fund_id") // quỹ nhận tiền khi duyệt
+  method         String    @default("CASH") // Admin Demo 14/7 — hình thức thanh toán: CASH | CK (áp cho mọi bút toán tiền khi duyệt)
+  status         String    @default("PENDING") // PENDING | APPROVED | REJECTED | CANCELLED
+  note           String?
+  requestedAt    DateTime  @default(now()) @map("requested_at") @db.Timestamptz(3)
+  decidedBy      Int?      @map("decided_by")
+  decidedAt      DateTime? @map("decided_at") @db.Timestamptz(3)
+  decisionNote   String?   @map("decision_note")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([status])
+  @@index([kind])
+  @@map("export_requests")
+}
+
+// Dòng gán seri/TID CỤ THỂ khi DUYỆT (N dòng theo quantity). Người duyệt chọn máy/TID lúc duyệt.
+model ExportRequestLine {
+  id              Int      @id @default(autoincrement())
+  exportRequestId Int      @map("export_request_id")
+  seq             Int // 1..N
+  posSerial       String?  @map("pos_serial")
+  tid             String?
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([exportRequestId])
+  @@map("export_request_lines")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SIGMA (2026-07-22, CMD_BUILD) — "Lô"/"Hóa đơn" nền tảng cho bot chat kết toán POS. Đại lý kết toán
+// (gộp N "bill lẻ" thành 1 "bill tổng kết") = 1 "lô" (bank cấp "số lô" riêng, KHÔNG phải "số hóa đơn" máy
+// POS in ra — 2 dãy số ĐỘC LẬP, xem comment cột bankReportedLoNumber/receiptNumber). Additive-only, scalar
+// id links (KHÔNG hard FK) — CÙNG quy ước "asset tables" ở đầu file (join ở service layer, bền với
+// soft-delete/rename). CHƯA có Rocket.Chat/OCR wiring (đây là nền backend thuần) — xem apps/bot-api/src/routes/lo.ts.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// 1 lô = 1 lần kết toán của 1 đại lý. status theo ĐÚNG khuôn Transaction (P1.2 — chứng từ bất biến, sai
+// thì HỦY qua duyệt, KHÔNG sửa tại chỗ): PENDING (đã báo giá/tạo lô, CHƯA có ảnh bill) → CONFIRMED (đối
+// soát OCR khớp — ĐỦ ĐIỀU KIỆN tạo Transaction thật ở TASK SAU, task này KHÔNG tự tạo Transaction) |
+// MISMATCH (đối soát chạy nhưng KHÔNG khớp/có cảnh báo — cần người kiểm tay) | CANCELLED (hủy, mirror
+// cancelReason/cancelledAt của Transaction — KHÔNG sửa tại chỗ).
+model Lo {
+  id                   Int       @id @default(autoincrement())
+  agentId              Int       @map("agent_id")
+  // "Số lô" do NGÂN HÀNG cấp cho đợt kết toán này — OCR từ ảnh bill tổng kết (chưa wiring OCR ở task này,
+  // model như field input thường). Nullable: LÚC TẠO LÔ (báo giá) CHƯA có ảnh bill nên chưa biết số này.
+  // Scoped THEO TID (mỗi TID có dãy số lô riêng của NH, KHÔNG phải theo đại lý — 1 đại lý nhiều TID trùng
+  // số lô là BÌNH THƯỜNG, LEAD xác nhận 23/7) — trùng số lô CÙNG 1 TID = đáng ngờ (xem checkLoNumberReuse
+  // @glb/business-rules) nhưng CHỈ CẢNH BÁO, KHÔNG chặn cứng (LEAD xác nhận nhiều lần).
+  bankReportedLoNumber Int?      @map("bank_reported_lo_number")
+  // Tổng tiền dự kiến = Σ amountAfterFee của các LoRow lúc báo giá (VND, nguyên) — CÙNG ngữ nghĩa tiền với
+  // Transaction.amount/các cột BigInt khác (R48 — tránh tràn int4).
+  expectedTotalAmount BigInt    @default(0) @map("expected_total_amount")
+  status               String    @default("PENDING") // PENDING|CONFIRMED|MISMATCH|CANCELLED
+  cancelReason         String?   @map("cancel_reason")
+  cancelledAt          DateTime? @map("cancelled_at") @db.Timestamptz(3)
+  // KHÓA BILL tự nhiên (21/8, nối bill→doanh số): định danh 1 BILL từ OCR (tid+số lô+số HĐ+ngày giờ — KHÔNG gồm
+  // số tiền) để gửi-lại/SỬA cùng bill = UPSERT CÙNG Lô (chống tạo Lô trùng + sửa bill cập nhật lại số tiền). Null
+  // cho Lô tạo qua "Bán TID" thủ công (không từ bill). Upsert theo (agentId, billKey, status≠CANCELLED) ở service.
+  billKey              String?   @map("bill_key")
+  // BRIDGE bill→doanh số SigMa (Admin Demo 24/8): Lô ghi từ bill TỰ tạo 1 Transaction (chứng từ admin) để
+  // báo cáo SigMa (đọc bảng transactions) thấy doanh số. Link 1-1 để CHỐNG tạo GD trùng khi bill gửi-lại
+  // (dedup UPSERT cùng Lô). Null = chưa/không tạo được GD (vd thiếu FeeRate — best-effort, KHÔNG chặn luồng bill).
+  transactionId        Int?      @unique @map("transaction_id")
+  // NGÀY BILL THẬT (giờ quẹt OCR trên bill) — lưu lúc /send để KHÔNG mất khi bridge gốc fail; reconcile/redate dùng
+  // cột này làm mốc ngày (thay created_at = giờ ghi) → doanh số luôn rơi ĐÚNG NGÀY bill (Admin Demo 31/8). Đọc/ghi qua
+  // raw SQL trong lo-service (persistLoBillTxnDate/readLoBillTxnDate) — client hiện chưa generate field này.
+  billTxnDate          DateTime? @map("bill_txn_date") @db.Timestamptz(3)
+  createdBy            Int?      @map("created_by")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([agentId])
+  @@index([status])
+  @@index([agentId, bankReportedLoNumber])
+  @@index([agentId, billKey])
+  @@map("los")
+}
+
+// Các dòng đã báo giá cho 1 lô lúc TẠO (khớp NGUYÊN shape response của POST /quote — tidId/cardTypeId/
+// feeTypeId/amountBeforeFee/feeApplied/amountAfterFee) — bảng quan hệ thật (KHÔNG JSON blob), khuôn
+// TidSellFee (scalar loId, không Prisma relation object, join ở service).
+model LoRow {
+  id              Int      @id @default(autoincrement())
+  loId            Int      @map("lo_id")
+  tidId           Int      @map("tid_id")
+  cardTypeId      Int      @map("card_type_id")
+  feeTypeId       Int      @map("fee_type_id")
+  amountBeforeFee BigInt   @map("amount_before_fee")
+  feeApplied      BigInt   @map("fee_applied")
+  amountAfterFee  BigInt   @map("amount_after_fee")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([loId])
+  @@map("lo_rows")
+}
+
+// "Bill lẻ" — 1 bản ghi OCR/nhập tay cho 1 lần quẹt riêng lẻ nằm TRONG 1 lô (đối soát ở POST /lo/:id/reconcile).
+model LoBill {
+  id            Int      @id @default(autoincrement())
+  loId          Int      @map("lo_id")
+  // "Số hóa đơn" in trên máy POS — dãy số RIÊNG của máy in liên tục (bill lẻ VÀ bill tổng kết dùng CHUNG
+  // 1 bộ đếm máy), có thể reset đầu ngày/nhảy/lặp → LƯU ĐỂ THAM KHẢO, KHÔNG unique constraint, KHÔNG chặn.
+  // CẬP NHẬT 2026-08-12 (Admin Demo): quyết định cũ 23/7 "TUYỆT ĐỐI KHÔNG validate liên tục" nay ĐƯỢC NỚI thành
+  // "THÊM CẢNH BÁO (không chặn)": khi đối soát lô, so thứ tự theo giờ quẹt trong CÙNG TID để CẢNH BÁO nghịch
+  // thứ tự/nhảy cóc (khách gửi thiếu bill)/reset đầu ngày/trùng toàn bộ OCR (gửi lại). Vẫn KHÔNG unique/không
+  // chặn CONFIRMED — chỉ HIỆN cảnh báo để người dùng đối chiếu (xem Rule G sigma-fraud-rules.ts +
+  // lo-service.ts/reconcileLo). Khác hẳn bankReportedLoNumber của Lo — 2 dãy số độc lập, không liên quan.
+  receiptNumber Int?     @map("receipt_number")
+  ocrAmount     BigInt   @map("ocr_amount")
+  swipeAt       DateTime @map("swipe_at") @db.Timestamptz(3) // mốc quẹt thật — dùng cho rule khoảng-cách-thời-gian (Rule D)
+  // Chỉ 4 SỐ CUỐI thẻ (tối giản dữ liệu kiểu PCI-DSS) — validate server-side ≤4 ký tự ở service, KHÔNG
+  // BAO GIỜ nhận/lưu số thẻ đầy đủ dù caller gửi gì (xem lo-fraud-service.ts / maskCardLast4).
+  cardLast4     String?  @map("card_last4")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([loId])
+  @@index([cardLast4])
+  @@map("lo_bills")
+}
+
+// Cấu hình rule chống gian lận THEO NGÂN HÀNG (Rule A-E @glb/business-rules/sigma-fraud-rules.ts).
+// null ở bất kỳ ngưỡng nào = KHÔNG giới hạn field đó. Master-data chuẩn (audit + soft-delete), khuôn
+// Bank/FeeType. KHÔNG @@unique(bankId) — có deletedAt (bài học B05: unique + soft-delete kẹt khi
+// xóa-rồi-tạo-lại) — "1 cấu hình đang sống / ngân hàng" enforce ở service (findFirst deletedAt:null
+// orderBy id desc), CÙNG khuôn lookup override TidSellFee/fee-quote.ts.
+model BankFraudRule {
+  id                           Int       @id @default(autoincrement())
+  bankId                       Int       @map("bank_id")
+  maxAmountPerSwipe            BigInt?   @map("max_amount_per_swipe") // null = không giới hạn
+  maxSwipesPerDayPerCard       Int?      @map("max_swipes_per_day_per_card") // null = không giới hạn
+  minGapMinutesBetweenSwipes   Int?      @map("min_gap_minutes_between_swipes") // null = không giới hạn
+  disallowRoundAmounts         Boolean   @default(false) @map("disallow_round_amounts")
+  disallowRepeatedAmountNearby Boolean   @default(false) @map("disallow_repeated_amount_nearby")
+  repeatedAmountWindowMinutes  Int?      @map("repeated_amount_window_minutes") // chỉ dùng khi disallowRepeatedAmountNearby=true
+  // Rule F (build 22/7, LEAD chốt): tổng số tiền quẹt/NGÀY cho 1 TID (khác chiều Rule A đơn-lệnh, Rule B
+  // số-lệnh — đây là TỔNG TIỀN). null = không giới hạn.
+  maxDailyTotalPerTid          BigInt?   @map("max_daily_total_per_tid")
+  createdBy                    Int?      @map("created_by")
+  createdAt                    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedBy                    Int?      @map("updated_by")
+  updatedAt                    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt                    DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy                    Int?      @map("deleted_by")
+
+  @@index([bankId])
+  @@map("bank_fraud_rules")
+}
+
+// SIGMA Phase 1 (23/7, CMD_BUILD) — thử thách OTP qua email (kế hoạch mục A: "Đăng ký tài khoản mới =
+// bước OTP-email TRƯỚC khi tạo user Rocket.Chat"). Bền qua restart process (Postgres, KHÔNG in-memory Map —
+// bot-api có thể chạy nhiều instance/restart bất kỳ lúc nào). codeHash = SHA-256 của mã 6 số, KHÔNG BAO GIỜ
+// lưu plaintext. purpose tách theo luồng nghiệp vụ (vd "AGENT_REGISTER") để 1 địa chỉ email có thể có nhiều
+// loại thử thách song song không đụng nhau. attempts đếm số lần sai (khóa cứng ở ngưỡng trong otp-service.ts,
+// KHÔNG chỉ dựa expiresAt). consumedAt đánh dấu ĐÃ TIÊU DÙNG THẬT (terminal — không bao giờ verify lại được
+// nữa). verifiedAt (24/7, CMD_BUILD fix B2 CMD_AUDIT) đánh dấu "mã đúng đã được CLAIM, đang chờ downstream
+// (rcCreateUser) hoàn tất" — TÁCH RIÊNG khỏi consumedAt để: (1) downstream fail → verifiedAt reset null, mã
+// verify lại được, KHÔNG bắt user xin mã mới; (2) 2 verify song song cùng mã đúng chỉ 1 request claim được
+// (request kia thấy verifiedAt đã set → chặn, không cùng gọi rcCreateUser 2 lần). Xem otp-service.ts.
+model EmailOtpChallenge {
+  id          Int       @id @default(autoincrement())
+  email       String
+  codeHash    String    @map("code_hash")
+  purpose     String
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(3)
+  attempts    Int       @default(0)
+  verifiedAt  DateTime? @map("verified_at") @db.Timestamptz(3)
+  consumedAt  DateTime? @map("consumed_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([email])
+  @@map("email_otp_challenges")
+}
+
+// SIGMA (26/7) — Thông báo đẩy kiểu Zalo qua Firebase Cloud Messaging (FCM). 1 hàng = 1 thiết bị đã đăng
+// ký nhận push cho 1 Agent (đăng ký lại/gỡ-cài-lại cùng thiết bị → UPSERT theo `token` UNIQUE, xem
+// routes/me.ts POST /v1/me/push-token — 1 token vật lý luôn thuộc ĐÚNG 1 agentId tại 1 thời điểm, đổi tài
+// khoản trên cùng máy sẽ ghi đè agentId cũ). platform hiện CHỈ 'android' (iOS ngoài phạm vi đợt này).
+// KHÔNG có FK cứng tới Agent (đúng convention file đầu schema — asset tables dùng scalar id link, join ở
+// service layer) — additive thuần, KHÔNG đụng bảng cũ nào.
+model PushToken {
+  id         String   @id @default(cuid())
+  agentId    Int      @map("agent_id")
+  token      String   @unique
+  platform   String // 'android' (KHÔNG làm iOS trong đợt này)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastUsedAt DateTime @default(now()) @map("last_used_at") @db.Timestamptz(3)
+
+  @@index([agentId])
+  @@map("push_tokens")
+}
+
+// SIGMA (27/7) — đính kèm ảnh/file THẬT trong chat ("Phần 1" kế hoạch đính kèm). Chat message VẪN đi qua
+// Rocket.Chat như trước (KHÔNG đổi) — file vật lý lưu RIÊNG ở bot-api (CHAT_UPLOADS_DIR trên đĩa, xem
+// chat-attachment-service.ts), tin nhắn RC chỉ chứa 1 dòng JSON marker `` trỏ tới attachment
+// này qua `id` (xem rc-realtime.ts mapRcMessage/uploadChatAttachment). KHÔNG có FK cứng tới Agent (đúng
+// convention file này — asset table dùng scalar id link, join ở service layer, xem PushToken/EmailOtpChallenge
+// phía trên) — additive thuần, KHÔNG đụng bảng cũ nào.
+// mimeType LUÔN là kết quả magic-bytes THẬT (file-type, xem chat-attachment-service.ts) — KHÔNG BAO GIỜ tin
+// Content-Type client tự khai (dễ giả mạo .exe thành "image/png"). storagePath là đường dẫn TƯƠNG ĐỐI dưới
+// CHAT_UPLOADS_DIR, tên file trên đĩa LUÔN là `<uuid>.<ext theo mime thật>` — KHÔNG BAO GIỜ dùng fileName gốc
+// (path traversal risk) cho đường dẫn vật lý, fileName gốc chỉ lưu để hiển thị/tải xuống.
+// roomId (nullable) — attachment được TẢI LÊN TRƯỚC khi tin nhắn RC tham chiếu nó được gửi (bot-api không có
+// bảng room-membership riêng, RC giữ quyền đó) nên lúc tạo row CHƯA biết nó thuộc phòng nào. Client PATCH lại
+// roomId NGAY sau khi gửi tin RC thành công (xem routes/chat-attachments.ts). roomId=null → GET chỉ cho phép
+// chính uploaderId xem (không ai khác đoán được id ngẫu nhiên cũng không đủ, vẫn chặn); roomId đã set → GET
+// xác thực THÊM quyền thành viên phòng RC thật (subscriptions.get) trước khi phục vụ file — xem comment đầy đủ
+// tại routes/chat-attachments.ts GET handler.
+model ChatAttachment {
+  id           String    @id @default(cuid())
+  uploaderId   Int       @map("uploader_id")
+  fileName     String    @map("file_name")
+  mimeType     String    @map("mime_type")
+  sizeBytes    Int       @map("size_bytes")
+  checksum     String // sha256 hex
+  storagePath  String    @map("storage_path")
+  roomId       String?   @map("room_id") // RC room id — set qua PATCH sau khi tin nhắn marker đã gửi, xem trên.
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([uploaderId])
+  @@map("chat_attachments")
+}
+
+// ── SIGMA Phase 2 (29/7) — chat lõi tự xây, thay Rocket.Chat cho web-demo trước (kế hoạch "bỏ hẳn RC",
+// xem BUGS_FIXED.md B47 trở đi + memory project_sigma_alpha.md). Đặt tên "Chat*" để KHÔNG đụng model
+// `Message` hiện có ở trên (thư nội bộ/thông báo hệ thống, khác ngữ nghĩa hoàn toàn — ĐÃ xác nhận trước khi
+// đặt tên, không suy đoán). DB `glb` DÙNG CHUNG với GLB gốc — mọi migration ở đây CHỈ additive (bảng mới/cột
+// nullable mới), TUYỆT ĐỐI không sửa/xóa bảng GLB đang dùng.
+
+model ChatRoom {
+  id              String    @id @default(cuid())
+  type            String // 'DIRECT' | 'GROUP'
+  name            String? // null cho DIRECT (tên hiển thị suy ra từ đối phương ở service layer)
+  avatarColor     String?   @map("avatar_color")
+  avatarUrl       String?   @map("avatar_url")
+  // Khóa chống trùng phòng DIRECT cho 1 CẶP agent: "min(agentA,agentB)-max(agentA,agentB)" — chỉ set khi
+  // type='DIRECT'. Ràng buộc UNIQUE có điều kiện đặt ở raw SQL migration (Prisma không diễn đạt được, cùng
+  // hạn chế đã gặp ở FriendRequest/PosTidBinding):
+  //   CREATE UNIQUE INDEX ... ON chat_rooms (direct_pair_key) WHERE type = 'DIRECT' AND deleted_at IS NULL
+  directPairKey   String?   @map("direct_pair_key")
+  pinnedMessageId String?   @map("pinned_message_id")
+  legacyRcRoomId  String?   @map("legacy_rc_room_id") // di trú lịch sử (KHÔNG di trú vật lý, chỉ đọc gộp) — xem comment routes/chat.ts
+  lastMessageAt   DateTime? @map("last_message_at") @db.Timestamptz(3) // denormalize để sort danh sách phòng O(1)
+  // SIGMA debt-chat-gaps (31/7) — "chỉ trưởng/phó nhóm được gửi tin" (GAP đã biết từ Phase 3, xem comment
+  // đầu GroupInfoPanel.tsx: toggle này bị ẨN vì hệ mới chưa có field tương đương `ro` của Rocket.Chat). Additive
+  // thuần, default false (KHÔNG đổi hành vi phòng cũ) — chỉ có ý nghĩa cho GROUP (DIRECT luôn 2 MEMBER ngang
+  // hàng, bật readOnly cho DIRECT vô nghĩa nhưng KHÔNG chặn ở DB, enforce ở service layer nếu cần). Khi true,
+  // sendMessage() (chat-message-service.ts) chỉ cho phép OWNER/ADMIN gửi tin — xem ROOM_READ_ONLY.
+  readOnly        Boolean   @default(false) @map("read_only")
+  // SIGMA "nhóm chat đầy đủ như Zalo" (5/8) — 3 tính năng quản trị nhóm bổ sung (migration
+  // 20260805150000_chat_group_admin, additive thuần default an toàn — KHÔNG đổi hành vi phòng cũ):
+  //   • requireApproval — bật/tắt DUYỆT thành viên: true = người lạ xin vào nhóm phải OWNER/ADMIN duyệt
+  //     (ChatRoomJoinRequest) mới thành thành viên; false (mặc định, giữ nguyên hành vi cũ) = requestJoin()
+  //     vào thẳng như addMember. CHỈ có ý nghĩa cho GROUP (DIRECT luôn đúng 2 người).
+  //   • maxMembers — GIỚI HẠN số thành viên (null = không giới hạn, mặc định). addMember/approveJoin CHẶN
+  //     khi số thành viên ĐANG hoạt động (leftAt IS NULL) đạt maxMembers — kiểm trong transaction có
+  //     SELECT ... FOR UPDATE khóa hàng phòng để chống race 2 người vào cùng lúc vượt trần.
+  requireApproval Boolean   @default(false) @map("require_approval")
+  maxMembers      Int?      @map("max_members")
+  // AVATAR NHÓM (5/8) — ảnh đại diện nhóm upload THẬT (BLOB thẳng trong hàng, CÙNG TIỀN LỆ Agent.avatarImage —
+  // xem agent-media-service.ts). KHÁC avatarUrl (String URL cũ, giữ nguyên) — khi upload, service set
+  // avatarUrl = đường dẫn GET /v1/chat/rooms/:id/avatar để client cũ đọc avatarUrl vẫn render được ảnh mới.
+  avatarImage     Bytes?    @map("avatar_image")
+  avatarImageMime String?   @map("avatar_image_mime") // "image/jpeg"|"image/png"|"image/webp" — magic-bytes lúc lưu, KHÔNG tin mime client
+  avatarUpdatedAt DateTime? @map("avatar_updated_at") @db.Timestamptz(3)
+  createdBy       Int?      @map("created_by")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(3) // giải tán/xóa phòng (soft)
+
+  members      ChatRoomMember[]
+  messages     ChatMessage[]
+  roomTids     ChatRoomTid[] // back-relation cho FK chat_room_tids_room_id_fkey (bắt buộc khi ChatRoomTid khai @relation tới ChatRoom).
+  pinnedMessages PinnedMessage[] // back-relation cho FK pinned_messages_room_id_fkey (GHIM NHIỀU — "Bảng tin").
+  joinRequests   ChatRoomJoinRequest[] // back-relation cho FK chat_room_join_requests_room_id_fkey (DUYỆT thành viên).
+
+  @@index([lastMessageAt])
+  @@index([legacyRcRoomId])
+  @@map("chat_rooms")
+}
+
+// GHIM KHÔNG GIỚI HẠN / "Bảng tin" (5/8, Admin Demo nhấn mạnh — Zalo cho ghim NHIỀU tin, không chỉ 1). Mỗi hàng =
+// 1 tin nhắn đang được ghim trong 1 phòng. THAY thế mô hình cũ "1 ChatRoom.pinnedMessageId duy nhất" — cột đó
+// GIỮ LẠI cho tương thích client cũ, luôn đồng bộ = tin ghim MỚI NHẤT (pinnedAt lớn nhất) hoặc null khi hết
+// ghim (xem chat-room-service.ts pinMessage/unpinMessage). messageId KHÔNG khai @relation tới ChatMessage (theo
+// convention "bolt-on scalar join" — tin nhắn CHỈ soft-delete, không hard-delete nên không mồ côi; listPinned
+// tự join + lọc deletedAt ở service). roomId CÓ FK CASCADE (khớp ChatRoomTid/ChatRoomJoinRequest — xóa phòng
+// thì dọn luôn danh sách ghim).
+model PinnedMessage {
+  id              Int      @id @default(autoincrement())
+  roomId          String   @map("room_id")
+  messageId       String   @map("message_id")
+  pinnedByAgentId Int      @map("pinned_by_agent_id")
+  pinnedAt        DateTime @default(now()) @map("pinned_at") @db.Timestamptz(3)
+
+  room ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, messageId])
+  @@index([roomId, pinnedAt])
+  @@map("pinned_messages")
+}
+
+// DUYỆT THÀNH VIÊN (5/8) — 1 hàng = 1 yêu cầu xin vào 1 phòng GROUP. status PENDING (đang chờ) | APPROVED (đã
+// duyệt → tạo ChatRoomMember) | REJECTED (từ chối). Chỉ có ý nghĩa khi ChatRoom.requireApproval=true. Ràng
+// buộc "1 yêu cầu ĐANG chờ / (phòng × agent)" = PARTIAL UNIQUE (roomId, agentId) WHERE status='PENDING' — cho
+// phép xin lại sau khi đã bị REJECTED/APPROVED (hàng cũ giữ làm lịch sử, giống FriendRequest). Prisma KHÔNG
+// diễn đạt được WHERE nên khai TAY trong migration.sql (chat_room_join_requests_room_agent_pending_uq), schema
+// CHỈ khai @@index. roomId FK CASCADE (khớp các bảng con khác của ChatRoom).
+model ChatRoomJoinRequest {
+  id          Int       @id @default(autoincrement())
+  roomId      String    @map("room_id")
+  agentId     Int       @map("agent_id")
+  status      String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  requestedAt DateTime  @default(now()) @map("requested_at") @db.Timestamptz(3)
+  decidedBy   Int?      @map("decided_by")
+  decidedAt   DateTime? @map("decided_at") @db.Timestamptz(3)
+
+  room ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, status])
+  @@index([agentId])
+  @@map("chat_room_join_requests")
+}
+
+// Vai trò cấp phòng (thay owner/moderator cứng của RC): OWNER (tạo phòng, 1 người, không tự rời trừ khi
+// chuyển quyền trước) | ADMIN (thêm/xóa thành viên, đổi tên, ghim tin) | MEMBER (thường).
+model ChatRoomMember {
+  id                Int       @id @default(autoincrement())
+  roomId            String    @map("room_id")
+  agentId           Int       @map("agent_id")
+  role              String    @default("MEMBER") // OWNER | ADMIN | MEMBER
+  joinedAt          DateTime  @default(now()) @map("joined_at") @db.Timestamptz(3)
+  leftAt            DateTime? @map("left_at") @db.Timestamptz(3) // rời phòng (soft) — rejoin = clear cột này, KHÔNG tạo hàng mới
+  lastReadMessageId String?   @map("last_read_message_id")
+  mutedUntil        DateTime? @map("muted_until") @db.Timestamptz(3)
+  // MENU HỘI THOẠI (nhấn giữ 1 dòng danh sách chat, kiểu Zalo — 7/8) — 3 trạng thái CÁ NHÂN per-agent per-room
+  // (migration 20260807120000_chat_conversation_menu, additive thuần nullable — KHÔNG đổi hành vi phòng cũ):
+  //   • pinnedAt  — GHIM HỘI THOẠI lên đầu danh sách chat (khác PinnedMessage = ghim TIN trong phòng). null =
+  //     không ghim. listRoomsForAgent sort pinnedAt DESC NULLS LAST trước, rồi lastMessageAt DESC.
+  //   • hiddenAt  — ẨN hội thoại khỏi danh sách (KHÔNG tự hiện lại khi có tin mới, khác removedAt). null = hiện.
+  //   • removedAt — XÓA hội thoại phía mình (tin VẪN còn). TỰ clear khi phòng có TIN MỚI (hiện lại như Zalo,
+  //     xem sendMessage() chat-message-service.ts). null = chưa xóa.
+  // listRoomsForAgent LOẠI phòng có hiddenAt HOẶC removedAt khác null khỏi danh sách trả về.
+  pinnedAt          DateTime? @map("pinned_at") @db.Timestamptz(3)
+  hiddenAt          DateTime? @map("hidden_at") @db.Timestamptz(3)
+  removedAt         DateTime? @map("removed_at") @db.Timestamptz(3)
+  //   • clearedAt — XÓA HỘI THOẠI kiểu Zalo (7/8, Admin Demo): "Xóa hội thoại" = xóa LỊCH SỬ phía mình. Mọi tin có
+  //     createdAt <= clearedAt bị ẨN khỏi CHÍNH agent này (list message lọc, unread đếm từ clearedAt). Khác
+  //     removedAt (chỉ ẩn khỏi danh sách, tin còn): clearedAt ẩn LUÔN nội dung. Nhắn lại → removedAt/hiddenAt bị
+  //     clear (hiện lại danh sách) NHƯNG clearedAt GIỮ → trò chuyện mở lại TRỐNG (chỉ tin mới sau khi xóa). Chỉ
+  //     ảnh hưởng agent này (phía kia không đụng). Migration TAY: ALTER ADD COLUMN cleared_at timestamptz(3).
+  clearedAt         DateTime? @map("cleared_at") @db.Timestamptz(3)
+  // SIGMA "Phân loại" (mục 21, việc #4, 31/7) — phân loại nhóm chat MÀ CHÍNH agent này (chủ hàng
+  // ChatRoomMember) tự gán cho phòng — CÁ NHÂN/không chia sẻ, đúng bản chất "1 hàng = 1 agent là thành viên
+  // 1 phòng" của model này (giống mutedUntil/lastReadMessageId ở trên, KHÔNG phải thuộc tính chung của
+  // ChatRoom — người khác trong CÙNG phòng có thể phân loại khác/không phân loại). null = "chưa phân loại".
+  // onDelete SetNull: xóa 1 ChatCategory → MỌI phòng đang gán category đó tự về "chưa phân loại", KHÔNG xóa
+  // thành viên/phòng (giữ nguyên hành vi Phase 0 mock cũ CategoryManagerModal.tsx).
+  categoryId        String?   @map("category_id")
+
+  room     ChatRoom      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  category ChatCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@unique([roomId, agentId])
+  @@index([agentId])
+  @@index([categoryId])
+  @@map("chat_room_members")
+}
+
+// MENU HỘI THOẠI — "Báo xấu" (7/8). 1 hàng = 1 lần agent báo xấu 1 phòng. KHÔNG khai @relation tới ChatRoom/
+// Agent (bolt-on scalar join, cùng convention PinnedMessage/ChatRoomTid — không thêm FK cứng cho rườm rà, chỉ
+// index theo room_id + reporter đủ tra cứu). reason tùy chọn (client có thể không nhập lý do). id = cuid app-layer.
+model ChatReport {
+  id              String   @id @default(cuid())
+  reporterAgentId Int      @map("reporter_agent_id")
+  roomId          String   @map("room_id")
+  reason          String?
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([roomId])
+  @@index([reporterAgentId])
+  @@map("chat_reports")
+}
+
+// SIGMA "Phân loại" (mục 21, việc #4, 31/7) — thay Phase 0 mock-only (mock-data/categories.ts +
+// CategoryManagerModal.tsx sửa thẳng mảng client, mất khi reload). Mỗi hàng = 1 phân loại DO 1 agent tự tạo,
+// CHỈ agent đó thấy/sửa/xóa (agentId = chủ sở hữu, kiểm ở tầng service chat-category-service.ts — KHÔNG
+// dùng chung giữa nhiều agent, khác hẳn StatusOption dùng chung của GLB gốc).
+model ChatCategory {
+  id        String   @id @default(cuid())
+  agentId   Int      @map("agent_id")
+  name      String
+  color     String // hex "#rrggbb" — validate/gợi ý ở FE (mock-data/categories.ts CATEGORY_SWATCHES), KHÔNG
+  // CHECK constraint DB (cùng cách schema này để validate giá trị hẹp ở tầng service, xem comment
+  // FriendRequest.categoryByFrom/categoryByTo).
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  members ChatRoomMember[]
+
+  @@index([agentId])
+  @@map("chat_categories")
+}
+
+// SIGMA "Doanh số theo nhóm chat" (1/8) — liên kết TID ↔ phòng chat khách hàng, GÁN TAY (Admin Demo xác nhận
+// trực tiếp: "nhân viên tự gán tay trên phần mềm quản lý SigMa hoặc SigMa" — KHÔNG tự động khớp theo tên
+// HKD, tên có thể trùng/viết khác nhau gây gắn nhầm). 1 phòng có thể gắn NHIỀU TID (khách có nhiều máy POS), 1
+// TID CHỈ gắn được 1 phòng tại 1 thời điểm (unique tidId — 1 TID đại diện đúng 1 khách/nhóm chat, gắn 2 nhóm
+// cùng lúc sẽ làm số liệu doanh số CHIA ĐÔI sai). Validate quyền ở service layer (chat-room-tid-service.ts):
+// CHỈ agent SỞ HỮU TID đó (Tid.agentId) VÀ đang là MEMBER phòng đó mới gán được — scalar join (KHÔNG Prisma
+// relation object), CÙNG convention Lo/LoRow/Tid đã dùng (service tự query/join tay).
+model ChatRoomTid {
+  id         Int       @id @default(autoincrement())
+  roomId     String    @map("room_id")
+  tidId      Int       @map("tid_id")
+  createdBy  Int?      @map("created_by") // agentId thực hiện gán — audit "ai gắn lúc nào" (Admin Demo yêu cầu ghi log rõ mọi thao tác ảnh hưởng doanh số)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  unlinkedAt DateTime? @map("unlinked_at") @db.Timestamptz(3) // null = đang gắn (active). Set khi gỡ — GIỮ hàng lại (không xóa) để
+  // getRoomRevenueReport tính doanh số đúng theo MỐC THỜI GIAN gắn/gỡ, tránh TID chuyển phòng "cướp" doanh số cũ (bug 1/8, LEAD tự phát hiện qua review độc lập).
+  unlinkedBy Int? @map("unlinked_by") // agentId thực hiện gỡ — cùng lý do audit như createdBy.
+
+  // FK KHAI BÁO cho KHỚP DB: migration 20260801160000_chat_room_tid THÊM 2 FK CASCADE trực tiếp bằng raw SQL
+  // (room_id→chat_rooms, tid_id→tids, ON DELETE CASCADE ON UPDATE CASCADE — xóa phòng/TID thì tự dọn liên kết,
+  // không mồ côi). Bảng này VỐN "bolt-on" (comment đầu model dùng scalar join ở service), nhưng vì DB ĐÃ có FK
+  // thật nên schema PHẢI khai @relation cho khớp (không có → drift, migrate diff exit≠0 — chính bug B113 khiến
+  // migrate dev xóa nhầm 2 FK này). onUpdate mặc định Prisma = Cascade (khớp ON UPDATE CASCADE), chỉ cần khai
+  // onDelete: Cascade. Join tay ở service vẫn giữ nguyên — @relation KHÔNG buộc dùng qua Prisma navigation.
+  room ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  tid  Tid      @relation(fields: [tidId], references: [id], onDelete: Cascade)
+
+  // 1 TID chỉ được ĐANG gắn (unlinkedAt IS NULL) tại 1 phòng — index thật là PARTIAL UNIQUE, khai báo tay trong
+  // migration.sql (Prisma schema không hỗ trợ WHERE trên @@unique) — XEM migration 20260801190000_chat_room_tid_history.
+  @@index([roomId])
+  @@index([tidId])
+  @@map("chat_room_tids")
+}
+
+// SIGMA "Nhóm chat theo loại phí của khách hàng" (cấu hình cơ sở, Admin Demo chốt) — 1 khách hàng có tối đa N
+// nhóm chat, MỖI nhóm ứng ĐÚNG 1 LOẠI PHÍ (FeeType: Ủy quyền/Tiền chờ/Tiền nhanh…). Nhóm = phòng NỘI BỘ
+// SigMa (roomId → ChatRoom), lưu kèm link + QR để hiển thị. SigMa = nguồn cấu hình cơ sở.
+//
+// MÔ HÌNH KỲ (Admin Demo 5/8) — mỗi hàng = 1 KỲ gán nhóm chat cho (khách × loại phí), KHÔNG phải soft-delete đơn
+// thuần. `assignedFrom` = mốc bắt đầu gán; `unassignedAt` = mốc kết thúc (null = ĐANG gán / active). MIRROR mô
+// hình ChatRoomTid.createdAt/unlinkedAt + tid_sell_fees hiệu-lực-theo-kỳ — để doanh số/OCR/TID quy về ĐÚNG nhóm
+// đang gán TẠI THỜI ĐIỂM phát sinh (attribution theo kỳ, không bị "cướp" khi đổi nhóm sau này).
+//   • Hủy gán = set unassignedAt = now (đóng kỳ, GIỮ lịch sử).
+//   • Đổi nhóm = đóng kỳ nhóm cũ (unassignedAt) + mở kỳ nhóm mới (hàng mới, assignedFrom = now).
+//   • Gán lại CÙNG loại phí sau khi đã hủy = mở kỳ mới (KHÔNG bị unique chặn vì kỳ cũ đã unassignedAt).
+//
+// RÀNG BUỘC "1 nhóm ACTIVE / loại phí / khách": unique(customerId, feeTypeId) chỉ tính kỳ ĐANG GÁN
+// (unassignedAt IS NULL) — Prisma schema KHÔNG diễn đạt được PARTIAL unique (WHERE), CÙNG hạn chế ở
+// ChatRoom.directPairKey / ChatRoomTid / tid_sell_fees. Ràng buộc thật là PARTIAL UNIQUE INDEX khai TAY trong
+// migration.sql (customer_chat_groups_customer_id_fee_type_id_active_key WHERE unassigned_at IS NULL), schema CHỈ
+// khai @@index. Index thứ 2 (room_id WHERE unassigned_at IS NULL) phục vụ picker "nhóm nào CHƯA gán khách nào".
+// Scalar link (no hard FK, join tại service) — nhất quán triết lý schema (customerId/feeTypeId/roomId).
+model CustomerChatGroup {
+  id           Int       @id @default(autoincrement())
+  customerId   Int       @map("customer_id")
+  feeTypeId    Int       @map("fee_type_id")
+  roomId       String?   @map("room_id") // nối ChatRoom nội bộ SigMa (nullable — nhóm có thể chưa gắn phòng)
+  // ZALO groupId (Admin Demo 25/8) — ánh xạ nhóm Zalo làm việc ↔ phòng SigMa của khách này (tên 2 bên KHÁC nhau
+  // nên KHÔNG khớp tự động — admin dán groupId Zalo). Watcher: bill từ nhóm Zalo này → phòng roomId + doanh số của
+  // customerId. Nullable (chưa dán). Không unique cứng (guard mềm ở service — 1 groupId → 1 nhóm active).
+  zaloGroupId  String?   @map("zalo_group_id")
+  link         String? // link mời/hiển thị nhóm
+  qr           String? // QR (text/url) để hiển thị
+  note         String?
+  assignedFrom DateTime  @default(now()) @map("assigned_from") @db.Timestamptz(3) // mốc BẮT ĐẦU kỳ gán
+  unassignedAt DateTime? @map("unassigned_at") @db.Timestamptz(3) // mốc KẾT THÚC kỳ (null = đang gán / active)
+  createdBy    Int?      @map("created_by")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  // PARTIAL UNIQUE thật (customerId, feeTypeId) WHERE unassigned_at IS NULL + index (room_id) WHERE unassigned_at IS NULL — migration.sql.
+  @@index([customerId])
+  // FIX DRIFT (5/8, chat-group-admin build) — migration 20260805130000 tạo index tên
+  // `customer_chat_groups_room_id_active_idx` (partial WHERE unassigned_at IS NULL). Prisma bỏ qua WHERE nhưng
+  // VẪN so tên → thiếu `map:` này thì migrate diff báo drift "rename ..._room_id_active_idx -> ..._room_id_idx"
+  // (bài học B113: schema PHẢI khai đúng TÊN index migration dựng ra). Thêm map cho khớp, KHÔNG đổi migration.
+  @@index([roomId], map: "customer_chat_groups_room_id_active_idx")
+  @@map("customer_chat_groups")
+}
+
+// NHÀ ĐẦU TƯ — Nhóm chat riêng của NĐT (Phase E, NHÂN BẢN CustomerChatGroup nhưng theo investorId, KHÔNG khóa
+// theo loại phí). 1 NĐT có NHIỀU nhóm chat TỰ DO (mỗi nhóm = 1 phòng NỘI BỘ SigMa, room_id → chat_rooms; lưu
+// kèm name/link/qr/note để hiển thị). MÔ HÌNH KỲ như CustomerChatGroup: assignedFrom..unassignedAt (null = đang
+// gán/active). Xóa = đóng kỳ (set unassigned_at), GIỮ lịch sử. KHÔNG partial-unique theo investorId (nhiều nhóm
+// active/NĐT được phép). Scalar link (no hard FK, join tại service) — nhất quán triết lý schema.
+model InvestorChatGroup {
+  id           Int       @id @default(autoincrement())
+  investorId   Int       @map("investor_id")
+  roomId       String?   @map("room_id") // nối ChatRoom nội bộ SigMa (nullable — nhóm có thể chưa gắn phòng)
+  zaloGroupId  String?   @map("zalo_group_id") // gID nhóm Zalo (g<N>) để watcher định tuyến bill tạm ứng NĐT
+  name         String? // tên nhóm (hiển thị) — NĐT tự do đặt, KHÔNG khóa theo loại phí
+  link         String? // link mời/hiển thị nhóm
+  qr           String? // QR (text/url) để hiển thị
+  note         String?
+  assignedFrom DateTime  @default(now()) @map("assigned_from") @db.Timestamptz(3) // mốc BẮT ĐẦU kỳ gán
+  unassignedAt DateTime? @map("unassigned_at") @db.Timestamptz(3) // mốc KẾT THÚC kỳ (null = đang gán / active)
+  createdBy    Int?      @map("created_by")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([investorId])
+  @@map("investor_chat_groups")
+}
+
+model ChatMessage {
+  id                      String    @id @default(cuid())
+  roomId                  String    @map("room_id")
+  senderId                Int?      @map("sender_id") // null = hệ thống (vd "X đã tạo nhóm")
+  kind                    String    @default("TEXT") // TEXT | IMAGE | FILE | VOICE | LOCATION | QR | SYSTEM
+  body                    String? // nội dung text hiển thị (TEXT) hoặc caption (IMAGE/FILE)
+  attachmentId            String?   @map("attachment_id") // trỏ ChatAttachment.id
+  metadataJson            String?   @map("metadata_json") // JSON tự do: LOCATION({lat,lng,label})/QR({amount,tid,bank})/VOICE({durationMs})
+  replyToMessageId        String?   @map("reply_to_message_id")
+  forwardedFromMessageId  String?   @map("forwarded_from_message_id")
+  editedAt                DateTime? @map("edited_at") @db.Timestamptz(3)
+  deletedAt               DateTime? @map("deleted_at") @db.Timestamptz(3) // "thu hồi" — quy tắc 48h enforce ở service, không ở DB
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  room      ChatRoom              @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  reactions ChatMessageReaction[]
+
+  @@index([roomId, createdAt])
+  @@index([senderId])
+  // FIX-PERF (4/8) — index #1 "top-1 tin mới nhất mỗi phòng" (CROSS JOIN LATERAL ở lastMessagesForRooms/
+  // markAllRead) — thay Sort external-merge tràn đĩa. Prisma 7 BIỂU DIỄN ĐƯỢC DESC bằng `sort: Desc` nên
+  // KHAI NGAY Ở ĐÂY (khớp migration TAY 20260804120000_chat_message_perf_indexes qua `map` cùng tên) để thoả
+  // guard chống-drift B113 (schema PHẢI khai đủ index thường mà migration dựng). Index #2 là PARTIAL (có
+  // `WHERE attachment_id IS NOT NULL AND deleted_at IS NULL`) — Prisma KHÔNG biểu diễn được partial nên GIỮ
+  // raw-SQL-only trong migration (đúng convention chat_rooms; migrate diff bỏ qua partial → không drift).
+  @@index([roomId, createdAt(sort: Desc), id(sort: Desc)], map: "chat_messages_room_created_id_desc_idx")
+  @@map("chat_messages")
+}
+
+// 1 người 1 emoji/1 tin nhắn (Admin Demo chốt 29/7: đổi emoji = thay cái cũ, bấm lại đúng emoji = bỏ thích/unlike
+// — giống Zalo). Service layer xử lý unlike bằng DELETE hàng này khi emoji gửi lên TRÙNG emoji hiện có.
+// FK tới ChatMessage thêm sau audit độc lập 29/7 (LOW — thiếu FK so với 2 quan hệ khác cùng migration) — hard-
+// delete tin nhắn hiện KHÔNG tồn tại (chỉ soft-delete deletedAt) nên chưa từng orphan thật, nhưng thêm CASCADE
+// ngay từ đầu để nhất quán + phòng job purge tương lai quên bảng này.
+model ChatMessageReaction {
+  id        Int      @id @default(autoincrement())
+  messageId String   @map("message_id")
+  agentId   Int      @map("agent_id")
+  emoji     String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, agentId])
+  @@index([messageId])
+  @@map("chat_message_reactions")
+}
+
+// SIGMA Phase 4 (30/7) — gọi thoại/video WebRTC tự xây (thay Rocket.Chat, kế hoạch "bỏ hẳn RC"). Additive
+// thuần, KHÔNG đụng bảng nào khác. CỐ Ý KHÔNG dùng @relation tới Agent — ĐÚNG convention "bolt-on table" đã
+// dùng nhất quán cho mọi bảng ChatRoom/ChatMessage/... của dự án này (join ở service layer, xem comment đầu
+// chat-room-service.ts) — callerId/calleeId là Int trần, service tự join Agent khi cần hiển thị tên.
+// status state machine: RINGING (mới tạo, đang đổ chuông) → ACCEPTED (callee bấm nghe) → ENDED (kết thúc bình
+// thường qua call_end) | REJECTED (callee từ chối) | CANCELLED (caller tự hủy trước khi callee trả lời) |
+// MISSED (hết 45s đổ chuông không ai trả lời) | FAILED (lỗi giao thức/timeout offer-answer/ICE, xem endReason).
+model CallSession {
+  id          String    @id @default(cuid())
+  callerId    Int       @map("caller_id")
+  calleeId    Int       @map("callee_id")
+  kind        String // 'VOICE' | 'VIDEO'
+  status      String    @default("RINGING") // RINGING|ACCEPTED|REJECTED|CANCELLED|MISSED|ENDED|FAILED
+  endReason   String?   @map("end_reason")
+  startedAt   DateTime  @default(now()) @map("started_at") @db.Timestamptz(3)
+  acceptedAt  DateTime? @map("accepted_at") @db.Timestamptz(3)
+  endedAt     DateTime? @map("ended_at") @db.Timestamptz(3)
+  durationSec Int?      @map("duration_sec")
+
+  @@index([callerId])
+  @@index([calleeId])
+  @@index([status])
+  @@map("call_sessions")
+}
+
+// SIGMA B113 (2/8, Admin Demo báo trực tiếp kèm ảnh chụp thật: "tài khoản khác cũng phải có thông báo bạn bè
+// cập nhật avatar, phải nhìn thấy trực quan khi có thay đổi avatar và ảnh bìa") — thông báo TRONG APP kiểu
+// Zalo, ghi 1 hàng cho MỖI bạn bè (FriendRequest status=ACCEPTED, friend-service.ts) khi 1 đại lý đổi
+// avatar/ảnh bìa (agent-media-service.ts saveAgentMedia()). Hiển thị qua NotificationBell.tsx (chuông ĐÃ CÓ
+// SẴN ở TopBar — trước đây CHỈ có feed lễ/Tết + sinh nhật TÍNH TOÁN THUẦN client-side, KHÔNG có bảng lưu sự
+// kiện nào — đây là bảng lưu sự kiện ĐẦU TIÊN cho hạ tầng chuông này, mở đường cho loại thông báo khác sau).
+// CHỈ trong-app — push FCM thật NGOÀI PHẠM VI đợt này (push-notification-service.ts đã có hạ tầng riêng gửi
+// tin nhắn mới, chưa nối cho loại sự kiện này, xem BUGS_FIXED.md B113 phần "vướng cần Admin Demo quyết định").
+// Additive thuần — CÙNG convention "bolt-on table" (KHÔNG @relation cứng tới Agent, join ở service layer, xem
+// comment đầu PushToken/ChatAttachment), KHÔNG đụng bảng cũ nào.
+model AgentNotification {
+  id               Int       @id @default(autoincrement())
+  recipientAgentId Int       @map("recipient_agent_id") // ai NHẬN thông báo này (1 người bạn của actor)
+  actorAgentId     Int       @map("actor_agent_id") // ai đã THỰC HIỆN hành động (đổi avatar/cover)
+  type             String // 'AVATAR_UPDATED' | 'COVER_UPDATED' — mở rộng loại mới CHỈ ở cột này, KHÔNG đổi shape bảng
+  postId           String?   @map("post_id") // #26 (8/8) — với thông báo Nhật ký (DIARY_*): id bài để click TRỎ ĐÚNG bài + highlight. null cho loại khác.
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  readAt           DateTime? @map("read_at") @db.Timestamptz(3) // null = CHƯA đọc — đếm badge chuông theo cột này
+
+  @@index([recipientAgentId, readAt])
+  @@map("agent_notifications")
+}
+
+// ── SIGMA "Nhật ký" / Newsfeed kiểu Facebook (3/8, Admin Demo yêu cầu trực tiếp) — đăng bài text+ảnh, cảm
+// xúc 6 loại (LIKE/LOVE/HAHA/WOW/SAD/ANGRY), bình luận, xem bài CỦA MÌNH + BẠN BÈ. Thay Phase 0 mock cục bộ
+// (DiaryScreen.tsx + mock-data/diary.ts). CÙNG convention "bolt-on table" nhất quán mọi bảng SigMa
+// (ChatRoom/ChatMessage/AgentNotification): KHÔNG @relation cứng tới Agent — join ở service layer (author/
+// commenter/reactor là Int trần). Additive thuần (4 bảng MỚI, KHÔNG đụng bảng cũ), migration tay
+// 20260803120000_diary_posts (KHÔNG prisma migrate dev — bài học B113). Ảnh lưu BLOB per-row (PostImage) CÙNG
+// TIỀN LỆ agent-media-service.ts (avatar/cover BLOB + sniff magic-bytes) — KHÔNG dùng ChatAttachment (mô hình
+// lưu FILE trên đĩa + roomId, ngữ nghĩa khác hẳn).
+model Post {
+  id            String    @id @default(cuid())
+  authorAgentId Int       @map("author_agent_id")
+  text          String // nội dung bài viết (validate độ dài ở service layer)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz(3) // soft-delete (chủ bài tự xóa)
+
+  images    PostImage[]
+  reactions PostReaction[]
+  comments  PostComment[]
+
+  @@index([authorAgentId, createdAt])
+  @@index([createdAt])
+  @@map("posts")
+}
+
+// Ảnh của 1 bài — BLOB trực tiếp (CÙNG tiền lệ Agent.avatarImage). `postId` NULLABLE giống ChatAttachment.roomId:
+// client upload ảnh TRƯỚC (postId=null, chủ = authorAgentId) rồi tạo bài tham chiếu imageIds → service set
+// postId + ord theo thứ tự (2 bước, khớp luồng "upload attachment → gửi tin" của chat lõi).
+model PostImage {
+  id            String   @id @default(cuid())
+  postId        String?  @map("post_id")
+  authorAgentId Int      @map("author_agent_id") // chủ upload — gate quyền gắn vào bài + xem ảnh chưa gắn
+  ord           Int      @default(0) // thứ tự hiển thị trong bài
+  image         Bytes // BYTEA — sniff magic-bytes lúc lưu (KHÔNG tin Content-Type client), allowlist jpeg/png/webp
+  imageMime     String   @map("image_mime")
+  sizeBytes     Int      @map("size_bytes")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  post Post? @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@index([authorAgentId])
+  @@map("post_images")
+}
+
+// 1 người 1 cảm xúc / 1 bài (Admin Demo: đổi cảm xúc = thay cái cũ; bấm lại đúng cảm xúc = bỏ — giống Facebook).
+// Service xử lý qua UPSERT (đổi type) / DELETE (bỏ). `type` String (LIKE|LOVE|HAHA|WOW|SAD|ANGRY) validate ở
+// service — KHÔNG enum DB, CÙNG convention ChatMessageReaction.emoji/FriendRequest.status.
+model PostReaction {
+  id        Int      @id @default(autoincrement())
+  postId    String   @map("post_id")
+  agentId   Int      @map("agent_id")
+  type      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, agentId])
+  @@index([postId])
+  @@map("post_reactions")
+}
+
+model PostComment {
+  id        String    @id @default(cuid())
+  postId    String    @map("post_id")
+  agentId   Int       @map("agent_id")
+  text      String
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3) // soft-delete (chỉ chủ bình luận)
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId, createdAt])
+  @@map("post_comments")
+}
+
+// SIGMA (3/8) — Đăng nhập bằng quét QR động (kiểu Zalo/WhatsApp Web). 1 hàng = 1 "thử thách" (challenge)
+// đăng nhập QR. MÁY TẠO QR (PC/web) giữ 1 cookie httpOnly `sigma_qr` = pollSecret THÔ (256-bit CSPRNG),
+// server CHỈ lưu HASH sha-256 của nó (`pollSecretHash`) — chỉ máy có pollSecret mới nhận được phiên ở bước
+// status (người CHỈ nhìn/chụp QR không lấy được phiên). Token QR cũng 256-bit CSPRNG, CHỈ lưu HASH
+// (`tokenHash`, UNIQUE) — token thô KHÔNG bao giờ ghi xuống DB. QR động: web gọi lại /create mỗi ~60s để xoay
+// token (tạo hàng MỚI), mỗi challenge TTL 120s (giao nhau 1 nhịp để tránh hụt lúc quét), 1-LẦN-DÙNG (status
+// APPROVED→CONSUMED atomic). `matchCode` = 2 chữ số hiển thị TO cạnh QR trên PC — điện thoại sau khi quét phải
+// GÕ LẠI đúng mã này (chống quét nhầm/relay) — lưu THÔ vì chỉ để người dùng đối chiếu, KHÔNG phải bí mật mật
+// mã; endpoint /info (điện thoại) KHÔNG trả matchCode (buộc đọc trên PC). `agentId` = danh tính TÀI KHOẢN của
+// ĐIỆN THOẠI đã xác thực lúc approve (KHÔNG tin input). requesterIp/requesterUa lưu để hiện màn xác nhận +
+// làm nhật ký sự kiện đăng nhập-qua-QR cho người dùng xem sau. KHÔNG FK cứng tới Agent (đúng convention asset
+// table của file này — join ở service layer). status: PENDING | APPROVED | CONSUMED | CANCELLED | SUPERSEDED.
+model QrLoginChallenge {
+  id              Int       @id @default(autoincrement())
+  tokenHash       String    @unique @map("token_hash") // sha256(token 256-bit) — token thô KHÔNG lưu
+  pollSecretHash  String    @map("poll_secret_hash") // sha256(pollSecret 256-bit) — cookie máy tạo QR
+  matchCode       String    @map("match_code") // 2 chữ số "00".."99" — hiển thị trên PC, KHÔNG trả qua /info
+  status          String    @default("PENDING") // PENDING|APPROVED|CONSUMED|CANCELLED|SUPERSEDED
+  requesterIp     String?   @map("requester_ip")
+  requesterUa     String?   @map("requester_ua")
+  approveAttempts Int       @default(0) @map("approve_attempts") // đếm số lần GÕ SAI matchCode — ≥3 → CANCELLED
+  agentId         Int?      @map("agent_id") // danh tính điện thoại đã duyệt (set lúc approve, từ req.agent.id)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt       DateTime  @map("expires_at") @db.Timestamptz(3)
+  approvedAt      DateTime? @map("approved_at") @db.Timestamptz(3)
+  consumedAt      DateTime? @map("consumed_at") @db.Timestamptz(3)
+
+  @@index([pollSecretHash])
+  @@index([agentId])
+  @@index([expiresAt])
+  @@map("qr_login_challenges")
+}

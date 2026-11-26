@@ -1,0 +1,103 @@
+{
+  "nav_contacts": {
+    "ms": 410,
+    "urlOk": true,
+    "url": "http://127.0.0.1:62760/app/contacts",
+    "contentLen": 288,
+    "longtasks": 0,
+    "longtaskMaxMs": 0
+  },
+  "nav_diary": {
+    "ms": 407,
+    "urlOk": true,
+    "url": "http://127.0.0.1:62760/app/diary",
+    "contentLen": 251,
+    "longtasks": 0,
+    "longtaskMaxMs": 0
+  },
+  "nav_calendar": {
+    "ms": 415,
+    "urlOk": true,
+    "url": "http://127.0.0.1:62760/app/calendar",
+    "contentLen": 888,
+    "longtasks": 1,
+    "longtaskMaxMs": 61
+  },
+  "nav_settings": {
+    "ms": 416,
+    "urlOk": true,
+    "url": "http://127.0.0.1:62760/app/settings",
+    "contentLen": 1322,
+    "longtasks": 1,
+    "longtaskMaxMs": 85
+  },
+  "nav_kpi": {
+    "ms": 413,
+    "urlOk": true,
+    "url": "http://127.0.0.1:62760/app/kpi",
+    "contentLen": 453,
+    "longtasks": 0,
+    "longtaskMaxMs": 0
+  },
+  "nav_chat_back": {
+    "ms": 413,
+    "urlOk": true,
+    "url": "http://127.0.0.1:62760/app/chat",
+    "contentLen": 306,
+    "longtasks": 0,
+    "longtaskMaxMs": 0
+  },
+  "openRoom_direct": {
+    "tToFirstMsgMs": 815,
+    "msgDomChildren": 29,
+    "scrollHeight": 2837,
+    "imgs": 3,
+    "longtasks": 0,
+    "longtaskMaxMs": 0,
+    "longtaskSumMs": 0
+  },
+  "scrollContainerFound": {
+    "scSel": "[data-perf-scroll=\"1\"]",
+    "msgChildren": 29
+  },
+  "afterLoadOlder": {
+    "children": 29,
+    "scrollHeight": 2837
+  },
+  "scroll_messages_direct": {
+    "frames": 224,
+    "totalMs": 3003,
+    "fps": 74.6,
+    "p95GapMs": 13.4,
+    "maxGapMs": 40,
+    "jankFrames": 2,
+    "scrollHeight": 2837,
+    "clientHeight": 633,
+    "longtasks": 0,
+    "longtaskMaxMs": 0,
+    "longtaskSumMs": 0
+  },
+  "typing_direct": {
+    "count": 46,
+    "medianMs": 26.7,
+    "p95Ms": 27.1,
+    "maxMs": 27.4,
+    "longtasks": 0,
+    "longtaskMaxMs": 0
+  },
+  "modal_creategroup": {
+    "ms": 426,
+    "longtasks": 0,
+    "longtaskMaxMs": 0
+  },
+  "modal_classify": {
+    "ms": 368,
+    "longtasks": 0,
+    "longtaskMaxMs": 0
+  },
+  "search_chatlist": {
+    "ms": 871,
+    "longtasks": 0,
+    "longtaskMaxMs": 0
+  }
+}

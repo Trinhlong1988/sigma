@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    /* Splash EXE — NHÂN BẢN ĐÚNG thiết kế AppSplash web (Admin Demo chốt 1/8): nền trắng + logo tile bo góc +
+       DẢI SÁNG QUÉT chéo qua logo + chữ SigMa. KHÔNG spinner. Sweep LẶP để giữ hiệu ứng suốt lúc app load. */
+    /* 7/8 (Admin Demo "nền trắng của app đâu") — NỀN TRẮNG đầy đủ (cửa sổ splash to bằng app ở main.js) → như app
+       đang mở với nền trắng + logo giữa (kiểu Zalo), KHÔNG phải ô vuông nhỏ tách rời, KHÔNG phải logo lơ lửng. */
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #fff; font-family: system-ui, 'Segoe UI', Arial, sans-serif; }
+    body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
+    .wrap { filter: drop-shadow(0 8px 24px rgba(5,121,204,0.28)); }
+    .tile { position: relative; width: 96px; height: 96px; border-radius: 28px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+    .tile img { width: 100%; height: 100%; object-fit: contain; }
+    .sweep { pointer-events: none; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.9), transparent); animation: splashSweep 1.15s cubic-bezier(0.4,0,0.2,1) infinite; }
+    @keyframes splashSweep { 0% { transform: translateX(-140%) skewX(-12deg); } 100% { transform: translateX(240%) skewX(-12deg); } }
+    .t { font-size: 20px; font-weight: 800; letter-spacing: 0.5px; color: #0f9fe0; }
+  </style>
+</head>
+<body>
+  <div class="wrap"><div class="tile"><img src="./../desktop/src/renderer/src/assets/sigma-logo.svg" alt="SigMa" /><div class="sweep"></div></div></div>
+  <div class="t">SigMa</div>
+</body>
+</html>

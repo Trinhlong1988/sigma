@@ -1,0 +1,13 @@
+{
+  "name": "@sigma/mb-feed",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Sidecar lấy lịch sử giao dịch MB (thư viện mbbank, không chính thức) — tách tiến trình để cách ly credential + mã bên thứ 3",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "mbbank": "^1.0.13"
+  }
+}
